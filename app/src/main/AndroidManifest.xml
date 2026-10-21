@@ -5,7 +5,9 @@
 
     <application
         android:allowBackup="false"
-        android:label="Mini Launcher"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="SimpleMC"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
         <activity
             android:name=".MainActivity"

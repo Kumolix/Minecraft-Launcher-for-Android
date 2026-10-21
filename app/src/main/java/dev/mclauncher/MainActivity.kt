@@ -50,7 +50,7 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(32), dp(16), dp(16))
         }
         root.addView(TextView(this).apply {
-            text = "Mini Launcher"
+            text = "SimpleMC Launcher"
             textSize = 24f
         })
         root.addView(TextView(this).apply {

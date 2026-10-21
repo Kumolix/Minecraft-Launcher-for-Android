@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="8">
+        <!-- верхняя грань (светлая) -->
+        <path
+            android:fillColor="#1B445F"
+            android:pathData="M54,28 L76.5,41 L54,54 L31.5,41 Z"
+            android:strokeColor="#006B79"
+            android:strokeLineJoin="round"
+            android:strokeWidth="1.6" />
+        <!-- левая грань (тёмная) -->
+        <path
+            android:fillColor="#10354F"
+            android:pathData="M31.5,41 L54,54 L54,80 L31.5,67 Z"
+            android:strokeColor="#006B79"
+            android:strokeLineJoin="round"
+            android:strokeWidth="1.6" />
+        <!-- правая грань (тёмная) -->
+        <path
+            android:fillColor="#10354F"
+            android:pathData="M54,54 L76.5,41 L76.5,67 L54,80 Z"
+            android:strokeColor="#006B79"
+            android:strokeLineJoin="round"
+            android:strokeWidth="1.6" />
+        <!-- светлый "пиксель" сбоку -->
+        <path
+            android:fillColor="#1B445F"
+            android:pathData="M31.5,41 L36.5,43.9 L36.5,69.9 L31.5,67 Z" />
+    </group>
+</vector>
