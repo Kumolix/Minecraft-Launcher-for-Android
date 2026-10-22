@@ -252,7 +252,7 @@ class MainActivity : Activity() {
             val p = hash.substring(0, 2) + "/" + hash
             assetTasks.add(Task(ASSETS_URL + p, File(assetsDir, "objects/$p"), hash))
         }
-        downloadAll("Ресурсы", assetTasks)
+        downloadAll("Ресурсы", assetTasks, fatal = false)
 
         // 5. Java-рантайм
         val java = ensureRuntime(root, javaMajor)
@@ -494,42 +494,73 @@ class MainActivity : Activity() {
         return md.digest().joinToString("") { "%02x".format(it) }
     }
 
+    @Volatile
+    private var lastDownloadError = ""
+
     private fun download(url: String, dest: File, sha1: String?): Boolean {
         if (dest.exists() && dest.length() > 0) return true
         dest.parentFile?.mkdirs()
-        repeat(3) {
+        for (attempt in 0 until 3) {
             try {
                 val c = URL(url).openConnection() as HttpURLConnection
-                c.connectTimeout = 15000
-                c.readTimeout = 30000
-                c.inputStream.use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
-                if (sha1 == null || sha1Of(dest) == sha1) return true
-                dest.delete()
+                c.connectTimeout = 20000
+                c.readTimeout = 40000
+                c.setRequestProperty("User-Agent", "SimpleMC/0.2")
+                val code = c.responseCode
+                if (code != 200) {
+                    lastDownloadError = "HTTP $code ($url)"
+                } else {
+                    c.inputStream.use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
+                    if (sha1 == null || sha1Of(dest) == sha1) return true
+                    lastDownloadError = "sha1 не совпал ($url)"
+                    dest.delete()
+                }
             } catch (e: Exception) {
+                lastDownloadError = "$e ($url)"
                 dest.delete()
+            }
+            try {
+                Thread.sleep(700L * (attempt + 1))
+            } catch (_: InterruptedException) {
             }
         }
         return false
     }
 
-    private fun downloadAll(label: String, tasks: List<Task>) {
+    /** Качает файлы в несколько проходов. fatal=false: при неудаче только предупреждение. */
+    private fun downloadAll(label: String, tasks: List<Task>, fatal: Boolean = true) {
         if (tasks.isEmpty()) return
         log("$label: ${tasks.size} файлов")
-        val done = AtomicInteger(0)
-        val failed = AtomicInteger(0)
-        val pool = Executors.newFixedThreadPool(8)
-        val futures = tasks.map { t ->
-            pool.submit(Runnable {
-                if (!download(t.url, t.dest, t.sha1)) failed.incrementAndGet()
-                val d = done.incrementAndGet()
-                if (d % 25 == 0 || d == tasks.size) {
-                    runOnUiThread { progress.progress = d * 100 / tasks.size }
-                }
-            })
+        var pending = tasks.filter { !(it.dest.exists() && it.dest.length() > 0) }
+        for (pass in 1..3) {
+            if (pending.isEmpty()) break
+            if (pass > 1) {
+                log("  повтор, осталось ${pending.size}. Последняя ошибка: $lastDownloadError")
+                Thread.sleep(2500)
+            }
+            val done = AtomicInteger(0)
+            val total = pending.size
+            val failedList = java.util.Collections.synchronizedList(ArrayList<Task>())
+            val pool = Executors.newFixedThreadPool(6)
+            val futures = pending.map { t ->
+                pool.submit(Runnable {
+                    if (!download(t.url, t.dest, t.sha1)) failedList.add(t)
+                    val d = done.incrementAndGet()
+                    if (d % 25 == 0 || d == total) {
+                        runOnUiThread { progress.progress = d * 100 / total }
+                    }
+                })
+            }
+            futures.forEach { it.get() }
+            pool.shutdown()
+            runOnUiThread { progress.progress = 0 }
+            pending = ArrayList(failedList)
         }
-        futures.forEach { it.get() }
-        pool.shutdown()
-        runOnUiThread { progress.progress = 0 }
-        if (failed.get() > 0) throw RuntimeException("$label: не скачано ${failed.get()} файлов")
+        if (pending.isNotEmpty()) {
+            val msg = "$label: не скачано ${pending.size} файлов. Причина: $lastDownloadError"
+            if (fatal) throw RuntimeException(msg)
+            log("ПРЕДУПРЕЖДЕНИЕ: $msg")
+            log("Продолжаем без них (для проверки Java они не нужны).")
+        }
     }
 }
