@@ -28,6 +28,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.GZIPInputStream
+import java.util.zip.ZipInputStream
 
 /**
  * SimpleMC Launcher, этап 2.
@@ -46,6 +47,12 @@ class MainActivity : Activity() {
         // Готовые сборки OpenJDK 21 для Android arm64 (открытый код, GPLv2 + Classpath Exception).
         // Лаунчер ищет в релизах первый подходящий архив; если не вышло, пробует следующий источник.
         // Свой архив можно положить в папку данных как runtime.tar.xz или runtime.tar.gz.
+        // Нативные библиотеки LWJGL под Android arm64 (подбираются по версии LWJGL из описания игры).
+        val LWJGL_REPOS = listOf(
+            "Unxkki/nlauncher-android-natives",
+            "MDTCopper/android-lwjgl3",
+            "yuyi2439/AndroidLWJGL"
+        )
         val RUNTIME_REPOS = listOf(
             "metinjakupi/openjdk-android-arm64",
             "feeldev12/nerion-android-jdk-build",
@@ -169,8 +176,8 @@ class MainActivity : Activity() {
                     File(root, "assets"), File(root, "libraries"), File(root, "versions"),
                     File(root, "natives"), File(root, "launch_command.txt"),
                     File(root, "runtime.tar.xz"), File(root, "runtime.tar.gz"),
-                    runtimeDir(), cacheDir
-                )
+                    runtimeDir(), cacheDir, File(filesDir, "natives"), File(filesDir, "lwjgl")
+                ) + (root.listFiles { f -> f.name.startsWith("lwjgl-natives") }?.toList() ?: emptyList())
                 for (t in targets) {
                     freed += sizeOf(t)
                     t.deleteRecursively()
@@ -195,7 +202,7 @@ class MainActivity : Activity() {
         val gameDir = File(root, "game").apply { mkdirs() }
         val assetsDir = File(root, "assets")
         val librariesDir = File(root, "libraries")
-        val natives = File(root, "natives/$VERSION").apply { mkdirs() }
+        val natives = File(filesDir, "natives/$VERSION").apply { mkdirs() }
         logFile = File(root, "launcher.log").also { it.writeText("") }
         log("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MODEL}, ${Build.SUPPORTED_ABIS.joinToString()}")
         log("Папка данных: ${root.path}")
@@ -230,12 +237,14 @@ class MainActivity : Activity() {
         )
 
         // 3. Библиотеки
+        var lwjglVer = ""
         val libTasks = ArrayList<Task>()
         val classpath = ArrayList<String>()
         val libs = v.getJSONArray("libraries")
         for (i in 0 until libs.length()) {
             val lib = libs.getJSONObject(i)
             if (!allowed(lib)) continue
+            lib.optString("name").let { if (it.startsWith("org.lwjgl:lwjgl:")) lwjglVer = it.split(":")[2] }
             val art = lib.optJSONObject("downloads")?.optJSONObject("artifact") ?: continue
             val dest = File(librariesDir, art.getString("path"))
             libTasks.add(Task(art.getString("url"), dest, art.optString("sha1", "").ifEmpty { null }))
@@ -262,6 +271,7 @@ class MainActivity : Activity() {
         // 5. Java-рантайм
         val java = ensureRuntime(root, javaMajor)
         val rt = java.parentFile!!.parentFile!!
+        val lwjglPath = ensureLwjgl(lwjglVer)
 
         // 6. Команда запуска
         val repl = mapOf(
@@ -295,6 +305,9 @@ class MainActivity : Activity() {
         cmd.add("-Djava.io.tmpdir=${cacheDir.path}")
         cmd.add("-Duser.home=${gameDir.path}")
         cmd.add("-Djava.awt.headless=true")
+        if (lwjglPath != null) cmd.add("-Dorg.lwjgl.librarypath=$lwjglPath")
+        cmd.add("-Dorg.lwjgl.util.Debug=true")
+        cmd.add("-Dorg.lwjgl.util.DebugLoader=true")
         cmd.addAll(jvmArgs)
         cmd.add(v.getString("mainClass"))
         cmd.addAll(gameArgs)
@@ -324,7 +337,110 @@ class MainActivity : Activity() {
             } else {
                 log("hs_err.log не создан: процесс убит системой или оборван на низком уровне.")
             }
-            logcatTail()
+        }
+    }
+
+    // ---------- LWJGL под Android ----------
+
+    /** Возвращает значение для -Dorg.lwjgl.librarypath или null, если библиотеки получить не удалось. */
+    private fun ensureLwjgl(version: String): String? {
+        if (version.isEmpty()) {
+            log("Версия LWJGL не определена, пропуск.")
+            return null
+        }
+        val dir = File(filesDir, "lwjgl")
+        fun hasMain() = dir.exists() && dir.walkTopDown().any { it.isFile && it.name == "liblwjgl.so" }
+        if (!hasMain()) {
+            log("Установка LWJGL $version для Android...")
+            val archive = downloadLwjgl(version) ?: return null
+            dir.deleteRecursively()
+            dir.mkdirs()
+            try {
+                if (archive.name.endsWith(".zip")) extractZip(archive, dir) else extractTar(archive, dir)
+            } catch (e: Exception) {
+                log("  ошибка распаковки: $e")
+                return null
+            }
+        } else {
+            log("LWJGL уже установлен.")
+        }
+        if (!hasMain()) {
+            log("liblwjgl.so не найдена в архиве. Содержимое:")
+            dir.walkTopDown().maxDepth(5).forEach { log("  " + it.relativeTo(dir).path) }
+            return null
+        }
+        val libs = dir.walkTopDown().filter { it.isFile && it.name.endsWith(".so") }.toList()
+        libs.forEach { it.setReadable(true, false); it.setExecutable(true, false) }
+        log("LWJGL: библиотек ${libs.size}: " + libs.joinToString(", ") { it.name })
+        return libs.map { it.parentFile!!.path }.distinct().joinToString(":")
+    }
+
+    private fun downloadLwjgl(version: String): File? {
+        val archiveRe = Regex("(?i).*\\.(zip|tar\\.xz|tar\\.gz)$")
+        val skipRe = Regex("(?i)src|source|sha|sums")
+        for (repo in LWJGL_REPOS) {
+            try {
+                log("Источник LWJGL: $repo")
+                val json = JSONArray(fetchText("https://api.github.com/repos/$repo/releases?per_page=30"))
+                var best: JSONObject? = null
+                var bestScore = -1
+                for (i in 0 until json.length()) {
+                    val rel = json.getJSONObject(i)
+                    val tag = rel.optString("tag_name")
+                    val assets = rel.optJSONArray("assets") ?: continue
+                    for (j in 0 until assets.length()) {
+                        val a = assets.getJSONObject(j)
+                        val name = a.getString("name")
+                        if (!archiveRe.matches(name) || skipRe.containsMatchIn(name)) continue
+                        if (!tag.contains(version) && !name.contains(version)) continue
+                        var score = 1
+                        if (name.contains("arm64", true) || name.contains("aarch64", true)) score += 2
+                        if (name.contains("lwjgl", true)) score += 1
+                        if (score > bestScore) {
+                            bestScore = score
+                            best = a
+                        }
+                    }
+                }
+                if (best == null) {
+                    log("  нет файла для версии $version")
+                    continue
+                }
+                val name = best.getString("name")
+                val ext = when {
+                    name.endsWith(".zip") -> ".zip"
+                    name.endsWith(".tar.gz") -> ".tar.gz"
+                    else -> ".tar.xz"
+                }
+                val dest = File(dataRoot(), "lwjgl-natives$ext")
+                log("  скачивание $name (${best.optLong("size") / 1024} КБ)")
+                downloadBig(best.getString("browser_download_url"), dest)
+                return dest
+            } catch (e: Exception) {
+                log("  ошибка: $e")
+            }
+        }
+        log("ПРЕДУПРЕЖДЕНИЕ: LWJGL для Android не получен. Игра остановится на загрузке liblwjgl.so.")
+        return null
+    }
+
+    private fun extractZip(archive: File, dest: File) {
+        val destPath = dest.canonicalPath
+        ZipInputStream(BufferedInputStream(archive.inputStream())).use { zin ->
+            var e = zin.nextEntry
+            while (e != null) {
+                val out = File(dest, e.name)
+                val p = out.canonicalPath
+                if (p == destPath || p.startsWith(destPath + File.separator)) {
+                    if (e.isDirectory) {
+                        out.mkdirs()
+                    } else {
+                        out.parentFile?.mkdirs()
+                        out.outputStream().use { o -> zin.copyTo(o) }
+                    }
+                }
+                e = zin.nextEntry
+            }
         }
     }
 
