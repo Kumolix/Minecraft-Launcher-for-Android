@@ -3,6 +3,7 @@ package dev.mclauncher
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -196,6 +197,7 @@ class MainActivity : Activity() {
         val librariesDir = File(root, "libraries")
         val natives = File(root, "natives/$VERSION").apply { mkdirs() }
         logFile = File(root, "launcher.log").also { it.writeText("") }
+        log("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MODEL}, ${Build.SUPPORTED_ABIS.joinToString()}")
         log("Папка данных: ${root.path}")
         log("Версия $VERSION, ник $NICK")
 
@@ -288,6 +290,7 @@ class MainActivity : Activity() {
         val cmd = ArrayList<String>()
         cmd.add(java.path)
         cmd.add("-Xmx1536M")
+        cmd.add("-XX:ErrorFile=${File(gameDir, "hs_err.log").path}")
         cmd.add("-Djava.io.tmpdir=${cacheDir.path}")
         cmd.add("-Duser.home=${gameDir.path}")
         cmd.add("-Djava.awt.headless=true")
@@ -308,10 +311,18 @@ class MainActivity : Activity() {
 
         // 8. Запуск игры
         log("Запуск игры...")
+        File(gameDir, "hs_err.log").delete()
         val gameCode = runProcess(cmd, rt, gameDir)
         log("Процесс игры завершён, код $gameCode")
         if (gameCode != 0) {
-            log("Это ожидаемо на этапе 2: графики и ввода под Android ещё нет.")
+            val hs = File(gameDir, "hs_err.log")
+            if (hs.exists()) {
+                log("--- hs_err.log (начало) ---")
+                hs.readLines().take(45).forEach { log(it) }
+                log("--- конец ---")
+            } else {
+                log("hs_err.log не создан: процесс убит системой или оборван на низком уровне.")
+            }
         }
     }
 

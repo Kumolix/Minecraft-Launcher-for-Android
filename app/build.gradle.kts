@@ -11,8 +11,8 @@ android {
         applicationId = "dev.mclauncher"
         minSdk = 26
         targetSdk = 28
-        versionCode = 4
-        versionName = "0.3"
+        versionCode = 5
+        versionName = "0.3.1"
     }
 
     compileOptions {
