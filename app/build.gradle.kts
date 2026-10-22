@@ -11,8 +11,8 @@ android {
         applicationId = "dev.mclauncher"
         minSdk = 26
         targetSdk = 28
-        versionCode = 8
-        versionName = "0.4"
+        versionCode = 9
+        versionName = rootProject.file("VERSION").readText().trim()
     }
 
     signingConfigs {

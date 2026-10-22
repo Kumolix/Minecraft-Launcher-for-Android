@@ -2,6 +2,7 @@ package dev.mclauncher
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
@@ -78,7 +79,7 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(32), dp(16), dp(16))
         }
         root.addView(TextView(this).apply {
-            text = "SimpleMC Launcher"
+            text = "SimpleMC Launcher " + versionLabel()
             textSize = 24f
         })
         root.addView(TextView(this).apply {
@@ -100,6 +101,10 @@ class MainActivity : Activity() {
             setOnClickListener { confirmWipe() }
         }
         root.addView(wipeBtn)
+        root.addView(Button(this).apply {
+            text = "Тест окна и JVM (этап 3)"
+            setOnClickListener { startActivity(Intent(this@MainActivity, GameActivity::class.java)) }
+        })
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
         }
@@ -116,6 +121,12 @@ class MainActivity : Activity() {
         scroll.addView(logView)
         root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
+    }
+
+    private fun versionLabel(): String = try {
+        "v-" + packageManager.getPackageInfo(packageName, 0).versionName
+    } catch (e: Exception) {
+        ""
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -305,7 +316,11 @@ class MainActivity : Activity() {
         cmd.add("-Djava.io.tmpdir=${cacheDir.path}")
         cmd.add("-Duser.home=${gameDir.path}")
         cmd.add("-Djava.awt.headless=true")
-        if (lwjglPath != null) cmd.add("-Dorg.lwjgl.librarypath=$lwjglPath")
+        if (lwjglPath != null) {
+            cmd.add("-Dorg.lwjgl.librarypath=$lwjglPath")
+            cmd.add("-Djna.boot.library.path=$lwjglPath")
+            cmd.add("-Djna.nosys=true")
+        }
         cmd.add("-Dorg.lwjgl.util.Debug=true")
         cmd.add("-Dorg.lwjgl.util.DebugLoader=true")
         cmd.addAll(jvmArgs)
