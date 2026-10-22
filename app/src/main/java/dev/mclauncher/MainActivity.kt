@@ -290,6 +290,7 @@ class MainActivity : Activity() {
         val cmd = ArrayList<String>()
         cmd.add(java.path)
         cmd.add("-Xmx1536M")
+        cmd.add("-XX:+UseSerialGC")
         cmd.add("-XX:ErrorFile=${File(gameDir, "hs_err.log").path}")
         cmd.add("-Djava.io.tmpdir=${cacheDir.path}")
         cmd.add("-Duser.home=${gameDir.path}")
@@ -323,6 +324,7 @@ class MainActivity : Activity() {
             } else {
                 log("hs_err.log не создан: процесс убит системой или оборван на низком уровне.")
             }
+            logcatTail()
         }
     }
 
@@ -471,6 +473,20 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Системный журнал приложения: там бывает трасса падения нативного кода. */
+    private fun logcatTail() {
+        try {
+            val p = ProcessBuilder("logcat", "-d", "-v", "brief", "-t", "400").redirectErrorStream(true).start()
+            val keep = Regex("DEBUG|libc|F/|backtrace|signal|#\\d+ pc|Abort|tombstone|SIGSEGV|SIGABRT|scudo|tag", RegexOption.IGNORE_CASE)
+            val lines = p.inputStream.bufferedReader().readLines().filter { keep.containsMatchIn(it) }
+            log("--- logcat (важные строки: ${lines.size}) ---")
+            lines.takeLast(60).forEach { log(it.take(220)) }
+            log("--- конец ---")
+        } catch (e: Exception) {
+            log("logcat недоступен: $e")
+        }
+    }
+
     private fun runProcess(cmd: List<String>, rt: File, workDir: File): Int {
         val pb = ProcessBuilder(cmd).directory(workDir).redirectErrorStream(true)
         val env = pb.environment()
@@ -586,6 +602,7 @@ class MainActivity : Activity() {
         for (attempt in 0 until 4) {
             val u = urls[attempt % urls.size]
             try {
+                dest.parentFile?.mkdirs()
                 val c = URL(u).openConnection() as HttpURLConnection
                 c.connectTimeout = 20000
                 c.readTimeout = 40000
@@ -619,7 +636,7 @@ class MainActivity : Activity() {
     private fun downloadAll(label: String, tasks: List<Task>, fatal: Boolean = true) {
         if (tasks.isEmpty()) return
         log("$label: ${tasks.size} файлов")
-        var pending = tasks.filter { !(it.dest.exists() && it.dest.length() > 0) }
+        var pending = tasks.distinctBy { it.dest.path }.filter { !(it.dest.exists() && it.dest.length() > 0) }
         if (pending.size < tasks.size) log("  уже скачано: ${tasks.size - pending.size}, осталось: ${pending.size}")
         for (pass in 1..3) {
             if (pending.isEmpty()) break

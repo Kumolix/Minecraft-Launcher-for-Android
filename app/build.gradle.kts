@@ -11,8 +11,22 @@ android {
         applicationId = "dev.mclauncher"
         minSdk = 26
         targetSdk = 28
-        versionCode = 5
-        versionName = "0.3.1"
+        versionCode = 6
+        versionName = "0.3.2"
+    }
+
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("simplemc.keystore")
+            storePassword = "simplemc123"
+            keyAlias = "simplemc"
+            keyPassword = "simplemc123"
+        }
+    }
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("fixed")
+        }
     }
 
     compileOptions {
