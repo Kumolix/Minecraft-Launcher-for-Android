@@ -26,6 +26,7 @@ import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.GZIPInputStream
 
 /**
  * SimpleMC Launcher, этап 2.
@@ -41,13 +42,15 @@ class MainActivity : Activity() {
         const val MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
         const val ASSETS_URL = "https://resources.download.minecraft.net/"
 
-        // Готовый Java-рантайм для Android (arm64). Состоит из двух архивов: общая часть + бинарники.
-        // Если архивы лежат в папке данных приложения под этими же именами, скачивание пропускается.
-        val RUNTIME_ORGS = listOf("PojavLauncherTeam")
-        val RUNTIME_BRANCHES = listOf("v3_openjdk", "main")
-        const val RUNTIME_PATH = "app_pojav/src/main/assets/components/jre-21/"
-        const val RUNTIME_UNIVERSAL = "universal.tar.xz"
-        const val RUNTIME_BIN = "bin-arm64.tar.xz"
+        // Готовые сборки OpenJDK 21 для Android arm64 (открытый код, GPLv2 + Classpath Exception).
+        // Лаунчер ищет в релизах первый подходящий архив; если не вышло, пробует следующий источник.
+        // Свой архив можно положить в папку данных как runtime.tar.xz или runtime.tar.gz.
+        val RUNTIME_REPOS = listOf(
+            "metinjakupi/openjdk-android-arm64",
+            "feeldev12/nerion-android-jdk-build",
+            "AstralNext/aml-android-jre",
+            "vhynlain/nlauncher-jre-android"
+        )
     }
 
     private class Task(val url: String, val dest: File, val sha1: String?)
@@ -164,7 +167,7 @@ class MainActivity : Activity() {
                 val targets = listOf(
                     File(root, "assets"), File(root, "libraries"), File(root, "versions"),
                     File(root, "natives"), File(root, "launch_command.txt"),
-                    File(root, RUNTIME_UNIVERSAL), File(root, RUNTIME_BIN),
+                    File(root, "runtime.tar.xz"), File(root, "runtime.tar.gz"),
                     runtimeDir(), cacheDir
                 )
                 for (t in targets) {
@@ -256,7 +259,7 @@ class MainActivity : Activity() {
 
         // 5. Java-рантайм
         val java = ensureRuntime(root, javaMajor)
-        val rt = runtimeDir()
+        val rt = java.parentFile!!.parentFile!!
 
         // 6. Команда запуска
         val repl = mapOf(
@@ -314,86 +317,118 @@ class MainActivity : Activity() {
 
     // ---------- Java-рантайм ----------
 
+    private fun findJava(rt: File): File? {
+        if (!rt.exists()) return null
+        return rt.walkTopDown().maxDepth(4)
+            .firstOrNull { it.isFile && it.name == "java" && it.parentFile?.name == "bin" }
+    }
+
     private fun ensureRuntime(root: File, javaMajor: Int): File {
         val rt = runtimeDir()
-        var java = File(rt, "bin/java")
-        if (java.exists()) {
+        findJava(rt)?.let {
             log("Java-рантайм уже установлен.")
-            return java
+            return it
         }
         log("Установка Java-рантайма...")
+        val local = listOf("runtime.tar.xz", "runtime.tar.gz").map { File(root, it) }
+            .firstOrNull { it.exists() && it.length() > 0 }
+        if (local != null) log("Найден локальный архив ${local.name}")
+        val archive = local ?: downloadRuntime(root)
         rt.deleteRecursively()
         rt.mkdirs()
-        for (name in listOf(RUNTIME_UNIVERSAL, RUNTIME_BIN)) {
-            val archive = File(root, name)
-            if (!archive.exists() || archive.length() == 0L) {
-                downloadRuntimePart(name, archive)
-            } else {
-                log("Найден локальный архив $name")
-            }
-            log("Распаковка $name (${archive.length() / 1024 / 1024} МБ)...")
-            extractTarXz(archive, rt)
-        }
-        // права на запуск для всего в bin/
-        File(rt, "bin").listFiles()?.forEach { it.setExecutable(true, false) }
-        java = File(rt, "bin/java")
-        if (!java.exists()) {
+        log("Распаковка ${archive.name} (${archive.length() / 1024 / 1024} МБ)...")
+        extractTar(archive, rt)
+        val java = findJava(rt)
+        if (java == null) {
             log("В рантайме нет bin/java. Содержимое:")
-            rt.walkTopDown().maxDepth(2).forEach { log("  " + it.relativeTo(rt).path) }
+            rt.walkTopDown().maxDepth(3).forEach { log("  " + it.relativeTo(rt).path) }
             throw RuntimeException("Рантайм имеет неожиданную структуру")
         }
-        File(rt, "release").takeIf { it.exists() }?.readLines()
+        java.parentFile?.listFiles()?.forEach { it.setExecutable(true, false) }
+        val home = java.parentFile!!.parentFile!!
+        File(home, "release").takeIf { it.exists() }?.readLines()
             ?.firstOrNull { it.startsWith("JAVA_VERSION") }?.let { log("Рантайм: $it (нужна $javaMajor)") }
         return java
     }
 
-    private fun downloadRuntimePart(name: String, dest: File) {
-        var lastError = ""
-        for (org in RUNTIME_ORGS) for (branch in RUNTIME_BRANCHES) {
-            val url = "https://github.com/$org/PojavLauncher/raw/$branch/$RUNTIME_PATH$name"
-            log("Скачивание: $url")
+    private fun downloadRuntime(root: File): File {
+        val pattern = Regex("(?i)^(?!.*src).*21.*(arm64|aarch64).*\\.tar\\.(xz|gz)$")
+        var lastError = "нет источников"
+        for (repo in RUNTIME_REPOS) {
             try {
-                val c = URL(url).openConnection() as HttpURLConnection
-                c.connectTimeout = 20000
-                c.readTimeout = 60000
-                val code = c.responseCode
-                if (code != 200) {
-                    lastError = "HTTP $code"
-                    log("  $lastError")
-                    continue
-                }
-                val total = c.contentLengthLong
-                var read = 0L
-                dest.parentFile?.mkdirs()
-                c.inputStream.use { i ->
-                    dest.outputStream().use { o ->
-                        val buf = ByteArray(65536)
-                        while (true) {
-                            val n = i.read(buf)
-                            if (n < 0) break
-                            o.write(buf, 0, n)
-                            read += n
-                            if (total > 0) runOnUiThread { progress.progress = (read * 100 / total).toInt() }
+                log("Источник Java: $repo")
+                val json = JSONArray(fetchText("https://api.github.com/repos/$repo/releases?per_page=15"))
+                var asset: JSONObject? = null
+                search@ for (i in 0 until json.length()) {
+                    val assets = json.getJSONObject(i).optJSONArray("assets") ?: continue
+                    for (j in 0 until assets.length()) {
+                        val a = assets.getJSONObject(j)
+                        if (pattern.matches(a.getString("name"))) {
+                            asset = a
+                            break@search
                         }
                     }
                 }
-                runOnUiThread { progress.progress = 0 }
-                log("  готово, ${dest.length() / 1024 / 1024} МБ")
-                return
+                if (asset == null) {
+                    lastError = "$repo: нет подходящего файла"
+                    log("  нет подходящего файла")
+                    continue
+                }
+                val name = asset.getString("name")
+                val ext = if (name.endsWith(".gz")) "tar.gz" else "tar.xz"
+                val dest = File(root, "runtime.$ext")
+                log("  скачивание $name (${asset.optLong("size") / 1024 / 1024} МБ)")
+                downloadBig(asset.getString("browser_download_url"), dest)
+                return dest
             } catch (e: Exception) {
-                lastError = e.toString()
-                log("  ошибка: $lastError")
-                dest.delete()
+                lastError = "$repo: $e"
+                log("  ошибка: $e")
             }
         }
         throw RuntimeException(
-            "Не удалось скачать $name ($lastError). Можно положить файл вручную в ${dest.parent} под именем $name"
+            "Не удалось скачать Java ($lastError). Можно положить архив вручную в ${root.path} под именем runtime.tar.xz"
         )
     }
 
-    private fun extractTarXz(archive: File, dest: File) {
+    /** Большой файл с прогрессом; пишется во временный файл и переименовывается после полной загрузки. */
+    private fun downloadBig(url: String, dest: File) {
+        val tmp = File(dest.path + ".part")
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.connectTimeout = 20000
+        c.readTimeout = 60000
+        c.setRequestProperty("User-Agent", "SimpleMC/0.3")
+        val code = c.responseCode
+        if (code != 200) throw RuntimeException("HTTP $code")
+        val total = c.contentLengthLong
+        var read = 0L
+        dest.parentFile?.mkdirs()
+        c.inputStream.use { i ->
+            tmp.outputStream().use { o ->
+                val buf = ByteArray(65536)
+                while (true) {
+                    val n = i.read(buf)
+                    if (n < 0) break
+                    o.write(buf, 0, n)
+                    read += n
+                    if (total > 0) runOnUiThread { progress.progress = (read * 100 / total).toInt() }
+                }
+            }
+        }
+        runOnUiThread { progress.progress = 0 }
+        if (total > 0 && tmp.length() != total) {
+            tmp.delete()
+            throw RuntimeException("файл скачан не полностью")
+        }
+        dest.delete()
+        if (!tmp.renameTo(dest)) throw RuntimeException("не удалось сохранить файл")
+        log("  готово, ${dest.length() / 1024 / 1024} МБ")
+    }
+
+    private fun extractTar(archive: File, dest: File) {
         val destPath = dest.canonicalPath
-        TarArchiveInputStream(XZCompressorInputStream(BufferedInputStream(archive.inputStream()))).use { tin ->
+        val raw = BufferedInputStream(archive.inputStream())
+        val stream = if (archive.name.endsWith(".gz")) GZIPInputStream(raw) else XZCompressorInputStream(raw)
+        TarArchiveInputStream(stream).use { tin ->
             var e = tin.nextTarEntry
             while (e != null) {
                 val out = File(dest, e.name)
@@ -405,6 +440,13 @@ class MainActivity : Activity() {
                             out.parentFile?.mkdirs()
                             out.delete()
                             Files.createSymbolicLink(out.toPath(), Paths.get(e.linkName))
+                        }
+                        e.isLink -> {
+                            out.parentFile?.mkdirs()
+                            try {
+                                Files.copy(File(dest, e.linkName).toPath(), out.toPath())
+                            } catch (_: Exception) {
+                            }
                         }
                         e.isFile -> {
                             out.parentFile?.mkdirs()
@@ -424,7 +466,8 @@ class MainActivity : Activity() {
         env["JAVA_HOME"] = rt.path
         env["HOME"] = workDir.path
         env["TMPDIR"] = cacheDir.path
-        env["LD_LIBRARY_PATH"] = listOf("lib", "lib/server", "lib/jli").joinToString(":") { File(rt, it).path }
+        env["LD_LIBRARY_PATH"] = listOf("lib", "lib/server", "lib/jli", "lib/aarch64", "lib/aarch64/server", "lib/aarch64/jli")
+            .map { File(rt, it) }.filter { it.isDirectory }.joinToString(":") { it.path }
         val p = pb.start()
         p.inputStream.bufferedReader().forEachLine { log(it) }
         return p.waitFor()
@@ -475,10 +518,19 @@ class MainActivity : Activity() {
     }
 
     private fun fetchText(url: String): String {
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 15000
-        c.readTimeout = 30000
-        return c.inputStream.bufferedReader().use { it.readText() }
+        var err: Exception? = null
+        for (u in listOf(url) + mirrorsFor(url)) {
+            try {
+                val c = URL(u).openConnection() as HttpURLConnection
+                c.connectTimeout = 15000
+                c.readTimeout = 30000
+                c.setRequestProperty("User-Agent", "SimpleMC/0.3")
+                return c.inputStream.bufferedReader().use { it.readText() }
+            } catch (e: Exception) {
+                err = e
+            }
+        }
+        throw err ?: RuntimeException("нет адреса")
     }
 
     private fun sha1Of(f: File): String {
@@ -497,28 +549,53 @@ class MainActivity : Activity() {
     @Volatile
     private var lastDownloadError = ""
 
+    /** Зеркало BMCLAPI: подстановка для хостов Mojang. Файлы всё равно проверяются по sha1. */
+    private fun mirrorsFor(url: String): List<String> {
+        val m = "https://bmclapi2.bangbang93.com"
+        return when {
+            url.startsWith("https://resources.download.minecraft.net/") ->
+                listOf(m + "/assets/" + url.removePrefix("https://resources.download.minecraft.net/"))
+            url.startsWith("https://libraries.minecraft.net/") ->
+                listOf(m + "/maven/" + url.removePrefix("https://libraries.minecraft.net/"))
+            url.startsWith("https://piston-data.mojang.com/") ->
+                listOf(m + "/" + url.removePrefix("https://piston-data.mojang.com/"))
+            url.startsWith("https://piston-meta.mojang.com/") ->
+                listOf(m + "/" + url.removePrefix("https://piston-meta.mojang.com/"))
+            url.startsWith("https://launcher.mojang.com/") ->
+                listOf(m + "/" + url.removePrefix("https://launcher.mojang.com/"))
+            else -> emptyList()
+        }
+    }
+
     private fun download(url: String, dest: File, sha1: String?): Boolean {
         if (dest.exists() && dest.length() > 0) return true
         dest.parentFile?.mkdirs()
-        for (attempt in 0 until 3) {
+        val tmp = File(dest.path + ".part")
+        val urls = listOf(url) + mirrorsFor(url)
+        for (attempt in 0 until 4) {
+            val u = urls[attempt % urls.size]
             try {
-                val c = URL(url).openConnection() as HttpURLConnection
+                val c = URL(u).openConnection() as HttpURLConnection
                 c.connectTimeout = 20000
                 c.readTimeout = 40000
-                c.setRequestProperty("User-Agent", "SimpleMC/0.2")
+                c.setRequestProperty("User-Agent", "SimpleMC/0.3")
                 val code = c.responseCode
                 if (code != 200) {
-                    lastDownloadError = "HTTP $code ($url)"
+                    lastDownloadError = "HTTP $code ($u)"
                 } else {
-                    c.inputStream.use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
-                    if (sha1 == null || sha1Of(dest) == sha1) return true
-                    lastDownloadError = "sha1 не совпал ($url)"
-                    dest.delete()
+                    c.inputStream.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
+                    if (sha1 == null || sha1Of(tmp) == sha1) {
+                        dest.delete()
+                        if (tmp.renameTo(dest)) return true
+                        lastDownloadError = "не удалось сохранить ($u)"
+                    } else {
+                        lastDownloadError = "sha1 не совпал ($u)"
+                    }
                 }
             } catch (e: Exception) {
-                lastDownloadError = "$e ($url)"
-                dest.delete()
+                lastDownloadError = "$e ($u)"
             }
+            tmp.delete()
             try {
                 Thread.sleep(700L * (attempt + 1))
             } catch (_: InterruptedException) {
@@ -532,6 +609,7 @@ class MainActivity : Activity() {
         if (tasks.isEmpty()) return
         log("$label: ${tasks.size} файлов")
         var pending = tasks.filter { !(it.dest.exists() && it.dest.length() > 0) }
+        if (pending.size < tasks.size) log("  уже скачано: ${tasks.size - pending.size}, осталось: ${pending.size}")
         for (pass in 1..3) {
             if (pending.isEmpty()) break
             if (pass > 1) {
