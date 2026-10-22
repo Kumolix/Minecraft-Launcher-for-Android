@@ -1,6 +1,10 @@
 package dev.mclauncher
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Button
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
@@ -61,14 +65,40 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
             setTextColor(Color.WHITE)
             setBackgroundColor(0x66000000)
             typeface = Typeface.MONOSPACE
-            textSize = 9f
+            textSize = 8f
             setPadding(12, 8, 12, 8)
+            maxLines = 45
         }
         root.addView(
             logView,
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
         )
+        val copy = Button(this).apply {
+            text = "Копировать лог"
+            textSize = 11f
+            setOnClickListener { copyLog() }
+        }
+        root.addView(
+            copy,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)
+        )
         setContentView(root)
+    }
+
+    private fun copyLog() {
+        val sb = StringBuilder()
+        try {
+            val f = gameLog
+            if (f != null && f.exists()) {
+                val t = f.readText()
+                sb.append(if (t.length > 30000) t.takeLast(30000) else t)
+            }
+        } catch (_: Exception) {
+        }
+        sb.append("\n--- экран ---\n").append(logView.text)
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("SimpleMC log", sb.toString()))
+        say("Лог скопирован в буфер обмена.")
     }
 
     private fun say(s: String) = runOnUiThread { logView.append(s + "\n") }
@@ -176,11 +206,11 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
                 if (f != null && f.exists()) {
                     RandomAccessFile(f, "r").use { raf ->
                         val len = raf.length()
-                        val start = maxOf(0L, len - 1800)
+                        val start = maxOf(0L, len - 7000)
                         raf.seek(start)
                         val buf = ByteArray((len - start).toInt())
                         raf.readFully(buf)
-                        val lines = String(buf).lines().takeLast(10)
+                        val lines = String(buf).lines().takeLast(45)
                         logView.text = lines.joinToString("\n")
                     }
                 }
