@@ -493,6 +493,13 @@ class MainActivity : Activity() {
         env["JAVA_HOME"] = rt.path
         env["HOME"] = workDir.path
         env["TMPDIR"] = cacheDir.path
+        env["MEMTAG_OPTIONS"] = "off"
+        val shim = File(applicationInfo.nativeLibraryDir, "libnotag.so")
+        if (shim.exists()) {
+            env["LD_PRELOAD"] = shim.path
+        } else {
+            log("ВНИМАНИЕ: libnotag.so не найдена в ${applicationInfo.nativeLibraryDir}")
+        }
         env["LD_LIBRARY_PATH"] = listOf("lib", "lib/server", "lib/jli", "lib/aarch64", "lib/aarch64/server", "lib/aarch64/jli")
             .map { File(rt, it) }.filter { it.isDirectory }.joinToString(":") { it.path }
         val p = pb.start()
