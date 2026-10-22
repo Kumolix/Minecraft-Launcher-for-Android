@@ -23,12 +23,19 @@ jobs:
         run: |
           NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
           CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
-          echo "NDK: $NDK"
-          test -x "$CC"
+          echo "::notice::NDK=$NDK cc_exists=$(test -x "$CC" && echo yes || echo no) os=$(. /etc/os-release; echo "$PRETTY_NAME")"
           OUT=app/src/main/jniLibs/arm64-v8a
           mkdir -p "$OUT"
-          "$CC" -shared -fPIC -O2 -o "$OUT/libnotag.so" native/notag.c
-          "$CC" -shared -fPIC -O2 -o "$OUT/libsimplemc.so" native/simplemc.c -llog -landroid -lEGL -lGLESv2 -ldl
+          set +e
+          {
+            "$CC" -shared -fPIC -O2 -o "$OUT/libnotag.so" native/notag.c &&
+            "$CC" -shared -fPIC -O2 -o "$OUT/libsimplemc.so" native/simplemc.c -llog -landroid -lEGL -lGLESv2 -ldl
+          } > native-build.log 2>&1
+          RC=$?
+          if [ $RC -ne 0 ]; then
+            echo "::error::native build failed rc=$RC: $(head -c 1800 native-build.log | tr '\n' '|')"
+            exit $RC
+          fi
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
