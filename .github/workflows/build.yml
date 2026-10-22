@@ -29,7 +29,8 @@ jobs:
           set +e
           {
             "$CC" -shared -fPIC -O2 -o "$OUT/libnotag.so" native/notag.c &&
-            "$CC" -shared -fPIC -O2 -o "$OUT/libsimplemc.so" native/simplemc.c -llog -landroid -lEGL -lGLESv2 -ldl
+            "$CC" -shared -fPIC -O2 -Wl,-soname,libglfw.so -o "$OUT/libglfw.so" native/glfw.c -llog -landroid -lEGL -ldl &&
+            "$CC" -shared -fPIC -O2 -o "$OUT/libsimplemc.so" native/simplemc.c -L"$OUT" -lglfw -llog -landroid -lEGL -lGLESv2 -ldl
           } > native-build.log 2>&1
           RC=$?
           if [ $RC -ne 0 ]; then

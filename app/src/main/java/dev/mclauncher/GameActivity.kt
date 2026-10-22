@@ -4,7 +4,10 @@ import android.app.Activity
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -12,7 +15,9 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
+import org.json.JSONObject
 import java.io.File
+import java.io.RandomAccessFile
 
 /** Мост к нативному коду. Загружается только в процессе игры. */
 object Native {
@@ -22,19 +27,28 @@ object Native {
 
     @JvmStatic external fun eglClear(surface: Surface): String
     @JvmStatic external fun startJvm(javaHome: String, options: Array<String>): String
+    @JvmStatic external fun setSurface(surface: Surface, w: Int, h: Int)
+    @JvmStatic external fun pushEvent(type: Int, a: Double, b: Double, c: Int)
+    @JvmStatic external fun setGlLib(path: String)
+    @JvmStatic external fun redirectOutput(path: String)
+    @JvmStatic external fun runMain(javaHome: String, options: Array<String>, mainClass: String, args: Array<String>): String
 }
 
 /**
- * Экран игры (отдельный процесс :game). Этап 3.2: проверяем, что
- *  1) из процесса можно рисовать на экран через EGL,
- *  2) Java запускается внутри процесса приложения.
+ * Экран игры (отдельный процесс :game).
+ * mode=test: проверка EGL и запуска Java.
+ * mode=game: запуск Minecraft внутри процесса.
  */
 class GameActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var logView: TextView
     private var started = false
+    private var mode = "game"
+    private val handler = Handler(Looper.getMainLooper())
+    private var gameLog: File? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        mode = intent.getStringExtra("mode") ?: "game"
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
@@ -45,10 +59,10 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
         root.addView(sv, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         logView = TextView(this).apply {
             setTextColor(Color.WHITE)
-            setBackgroundColor(0x99000000.toInt())
+            setBackgroundColor(0x66000000)
             typeface = Typeface.MONOSPACE
-            textSize = 11f
-            setPadding(16, 16, 16, 16)
+            textSize = 9f
+            setPadding(12, 8, 12, 8)
         }
         root.addView(
             logView,
@@ -59,46 +73,155 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
 
     private fun say(s: String) = runOnUiThread { logView.append(s + "\n") }
 
+    // ---------- поверхность ----------
     override fun surfaceCreated(holder: SurfaceHolder) {}
     override fun surfaceDestroyed(holder: SurfaceHolder) {}
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        if (mode == "game") {
+            try {
+                Native.setSurface(holder.surface, width, height)
+            } catch (e: Throwable) {
+                say("ОШИБКА setSurface: $e")
+            }
+        }
         if (started) return
         started = true
         say("Экран: ${width}x$height")
         val surface = holder.surface
-        Thread {
-            try {
-                say(Native.eglClear(surface))
-                startJvmTest()
-            } catch (e: Throwable) {
-                say("ОШИБКА: $e")
-            }
-        }.start()
+        if (mode == "test") {
+            Thread {
+                try {
+                    say(Native.eglClear(surface))
+                    startJvmTest()
+                } catch (e: Throwable) {
+                    say("ОШИБКА: $e")
+                }
+            }.start()
+        } else {
+            Thread(null, { runGame() }, "game-main", 32L * 1024 * 1024).start()
+        }
     }
 
-    private fun startJvmTest() {
+    private fun findJavaHome(): File? {
         val rt = File(filesDir, "runtime")
         val java = rt.walkTopDown().maxDepth(4)
             .firstOrNull { it.isFile && it.name == "java" && it.parentFile?.name == "bin" }
-        if (java == null) {
+        return java?.parentFile?.parentFile
+    }
+
+    private fun startJvmTest() {
+        val home = findJavaHome()
+        if (home == null) {
             say("Java-рантайм не установлен. Сначала нажмите «Играть» в главном окне.")
             return
         }
-        val home = java.parentFile!!.parentFile!!
-        val opts = arrayOf(
-            "-Xmx512M", "-XX:+UseSerialGC", "-Xrs",
-            "-Djava.io.tmpdir=${cacheDir.path}",
-            "-Djava.awt.headless=true"
-        )
-        // JVM нужно создавать в потоке с большим стеком
-        val t = Thread(null, {
+        val opts = arrayOf("-Xmx512M", "-XX:+UseSerialGC", "-Xrs", "-Djava.io.tmpdir=${cacheDir.path}", "-Djava.awt.headless=true")
+        Thread(null, {
             try {
                 say(Native.startJvm(home.path, opts))
             } catch (e: Throwable) {
                 say("ОШИБКА JVM: $e")
             }
-        }, "jvm-start", 16L * 1024 * 1024)
-        t.start()
+        }, "jvm-start", 16L * 1024 * 1024).start()
+    }
+
+    // ---------- игра ----------
+    private fun runGame() {
+        try {
+            val dataDir = getExternalFilesDir(null) ?: filesDir
+            val launchFile = File(dataDir, "launch.json")
+            if (!launchFile.exists()) {
+                say("Нет launch.json. Сначала нажмите «Играть» в главном окне.")
+                return
+            }
+            val j = JSONObject(launchFile.readText())
+            val jvm = j.getJSONArray("jvm")
+            val opts = ArrayList<String>()
+            var i = 0
+            while (i < jvm.length()) {
+                val a = jvm.getString(i)
+                if ((a == "-cp" || a == "-classpath") && i + 1 < jvm.length()) {
+                    opts.add("-Djava.class.path=" + jvm.getString(i + 1))
+                    i += 2
+                    continue
+                }
+                opts.add(a)
+                i++
+            }
+            if (!opts.contains("-Xrs")) opts.add("-Xrs")
+            val game = j.getJSONArray("game")
+            val args = Array(game.length()) { game.getString(it) }
+
+            val log = File(dataDir, "game.log")
+            gameLog = log
+            Native.redirectOutput(log.path)
+            runOnUiThread { handler.post(tailer) }
+
+            val gl = j.optString("glLib", "")
+            if (gl.isNotEmpty()) Native.setGlLib(gl)
+            say("Запуск Minecraft в процессе...")
+            val r = Native.runMain(j.getString("javaHome"), opts.toTypedArray(), j.getString("main"), args)
+            say(r)
+        } catch (e: Throwable) {
+            say("ОШИБКА игры: $e")
+        }
+    }
+
+    /** Показывает последние строки лога игры на экране. */
+    private val tailer = object : Runnable {
+        override fun run() {
+            try {
+                val f = gameLog
+                if (f != null && f.exists()) {
+                    RandomAccessFile(f, "r").use { raf ->
+                        val len = raf.length()
+                        val start = maxOf(0L, len - 1800)
+                        raf.seek(start)
+                        val buf = ByteArray((len - start).toInt())
+                        raf.readFully(buf)
+                        val lines = String(buf).lines().takeLast(10)
+                        logView.text = lines.joinToString("\n")
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            handler.postDelayed(this, 700)
+        }
+    }
+
+    // ---------- ввод ----------
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (mode != "game") return super.onTouchEvent(e)
+        val x = e.x.toDouble()
+        val y = e.y.toDouble()
+        try {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    Native.pushEvent(3, x, y, 0)
+                    Native.pushEvent(4, 0.0, 0.0, 1)
+                }
+                MotionEvent.ACTION_MOVE -> Native.pushEvent(3, x, y, 0)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    Native.pushEvent(3, x, y, 0)
+                    Native.pushEvent(4, 0.0, 0.0, 0)
+                }
+            }
+        } catch (_: Throwable) {
+        }
+        return true
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (mode != "game") {
+            super.onBackPressed()
+            return
+        }
+        try {
+            Native.pushEvent(1, 256.0, 0.0, 1) // Esc нажата
+            Native.pushEvent(1, 256.0, 0.0, 0) // Esc отпущена
+        } catch (_: Throwable) {
+        }
     }
 }

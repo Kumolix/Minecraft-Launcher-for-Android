@@ -40,6 +40,7 @@ import java.util.zip.ZipInputStream
 class MainActivity : Activity() {
 
     companion object {
+        const val INPROCESS = true
         const val NICK = "Player"
         const val VERSION = "1.21.3"
         const val MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
@@ -103,7 +104,9 @@ class MainActivity : Activity() {
         root.addView(wipeBtn)
         root.addView(Button(this).apply {
             text = "Тест окна и JVM (этап 3)"
-            setOnClickListener { startActivity(Intent(this@MainActivity, GameActivity::class.java)) }
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, GameActivity::class.java).putExtra("mode", "test"))
+            }
         })
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
@@ -187,7 +190,7 @@ class MainActivity : Activity() {
                     File(root, "assets"), File(root, "libraries"), File(root, "versions"),
                     File(root, "natives"), File(root, "launch_command.txt"),
                     File(root, "runtime.tar.xz"), File(root, "runtime.tar.gz"),
-                    runtimeDir(), cacheDir, File(filesDir, "natives"), File(filesDir, "lwjgl")
+                    runtimeDir(), cacheDir, File(filesDir, "natives"), File(filesDir, "lwjgl"), File(filesDir, "mg"), File(root, "mg-plugin.apk")
                 ) + (root.listFiles { f -> f.name.startsWith("lwjgl-natives") }?.toList() ?: emptyList())
                 for (t in targets) {
                     freed += sizeOf(t)
@@ -283,6 +286,7 @@ class MainActivity : Activity() {
         val java = ensureRuntime(root, javaMajor)
         val rt = java.parentFile!!.parentFile!!
         val lwjglPath = ensureLwjgl(lwjglVer)
+        val mgPath = ensureMobileGlues()
 
         // 6. Команда запуска
         val repl = mapOf(
@@ -316,17 +320,28 @@ class MainActivity : Activity() {
         cmd.add("-Djava.io.tmpdir=${cacheDir.path}")
         cmd.add("-Duser.home=${gameDir.path}")
         cmd.add("-Djava.awt.headless=true")
+        val libPath = (if (lwjglPath != null) "$lwjglPath:" else "") + applicationInfo.nativeLibraryDir
+        cmd.add("-Dorg.lwjgl.librarypath=$libPath")
         if (lwjglPath != null) {
-            cmd.add("-Dorg.lwjgl.librarypath=$lwjglPath")
             cmd.add("-Djna.boot.library.path=$lwjglPath")
             cmd.add("-Djna.nosys=true")
         }
+        if (mgPath != null) cmd.add("-Dorg.lwjgl.opengl.libname=$mgPath")
         cmd.add("-Dorg.lwjgl.util.Debug=true")
         cmd.add("-Dorg.lwjgl.util.DebugLoader=true")
         cmd.addAll(jvmArgs)
         cmd.add(v.getString("mainClass"))
         cmd.addAll(gameArgs)
         File(root, "launch_command.txt").writeText(cmd.joinToString("\n"))
+        val mainName = v.getString("mainClass")
+        val mainIdx = cmd.indexOf(mainName)
+        val launch = JSONObject()
+        launch.put("javaHome", rt.path)
+        launch.put("main", mainName)
+        launch.put("jvm", JSONArray(cmd.subList(1, mainIdx)))
+        launch.put("game", JSONArray(cmd.subList(mainIdx + 1, cmd.size)))
+        launch.put("glLib", mgPath ?: "")
+        File(root, "launch.json").writeText(launch.toString())
         log("Команда запуска собрана (${cmd.size} аргументов).")
 
         // 7. Проверка Java
@@ -338,7 +353,15 @@ class MainActivity : Activity() {
         }
         log("Java работает.")
 
-        // 8. Запуск игры
+        if (INPROCESS) {
+            log("Открываю окно игры...")
+            runOnUiThread {
+                startActivity(Intent(this, GameActivity::class.java).putExtra("mode", "game"))
+            }
+            return
+        }
+
+        // 8. Запуск игры (отдельным процессом, без экрана)
         log("Запуск игры...")
         File(gameDir, "hs_err.log").delete()
         val gameCode = runProcess(cmd, rt, gameDir)
@@ -352,6 +375,57 @@ class MainActivity : Activity() {
             } else {
                 log("hs_err.log не создан: процесс убит системой или оборван на низком уровне.")
             }
+        }
+    }
+
+    // ---------- MobileGlues (OpenGL поверх OpenGL ES) ----------
+
+    /** Берёт libmobileglues.so из плагина MobileGlues (LGPL-2.1). Возвращает путь к файлу или null. */
+    private fun ensureMobileGlues(): String? {
+        val dir = File(filesDir, "mg")
+        fun find() = if (!dir.exists()) null else dir.walkTopDown()
+            .firstOrNull { it.isFile && it.name == "libmobileglues.so" && it.path.contains("arm64") }
+        find()?.let {
+            log("MobileGlues уже установлен.")
+            return it.path
+        }
+        log("Установка MobileGlues...")
+        try {
+            val json = JSONArray(fetchText("https://api.github.com/repos/MobileGL-Dev/MobileGlues-release/releases?per_page=10"))
+            var best: JSONObject? = null
+            search@ for (i in 0 until json.length()) {
+                val assets = json.getJSONObject(i).optJSONArray("assets") ?: continue
+                for (j in 0 until assets.length()) {
+                    val a = assets.getJSONObject(j)
+                    val n = a.getString("name")
+                    if (n.endsWith(".apk", true) && n.contains("mobileglues", true)) {
+                        best = a
+                        break@search
+                    }
+                }
+            }
+            if (best == null) {
+                log("  APK MobileGlues не найден в релизах")
+                return null
+            }
+            log("  скачивание ${best.getString("name")}")
+            val apk = File(dataRoot(), "mg-plugin.apk")
+            downloadBig(best.getString("browser_download_url"), apk)
+            dir.deleteRecursively()
+            dir.mkdirs()
+            extractZip(apk, dir)
+            val f = find()
+            if (f == null) {
+                log("  libmobileglues.so не найдена в APK. Содержимое:")
+                dir.walkTopDown().filter { it.isFile && it.name.endsWith(".so") }.forEach { log("    " + it.relativeTo(dir).path) }
+                return null
+            }
+            f.setReadable(true, false)
+            log("  готово: ${f.name}")
+            return f.path
+        } catch (e: Exception) {
+            log("  ошибка MobileGlues: $e")
+            return null
         }
     }
 

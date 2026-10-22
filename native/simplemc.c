@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <unistd.h>
 
 #define TAG "SimpleMC"
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -78,17 +80,19 @@ static void getProp(JNIEnv* e, jclass sys, jmethodID gp, const char* key, char* 
     }
 }
 
-JNIEXPORT jstring JNICALL Java_dev_mclauncher_Native_startJvm(JNIEnv* env, jclass cls, jstring javaHome, jobjectArray opts) {
-    char out[2048], path[1024];
+// функции из libglfw.so
+extern void smc_push_event(int type, double a, double b, int c);
+extern void smc_set_surface(ANativeWindow* w, int width, int height);
+extern void smc_set_gl_lib(const char* path);
+
+static jint create_jvm(JNIEnv* env, jstring javaHome, jobjectArray opts, JavaVM** jvm, JNIEnv** jenv, char* err, size_t cap) {
+    char path[1024];
     const char* home = (*env)->GetStringUTFChars(env, javaHome, NULL);
     snprintf(path, sizeof path, "%s/lib/server/libjvm.so", home);
     void* h = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
-    if (!h) {
-        snprintf(out, sizeof out, "JVM: dlopen(%s) не удался: %s", path, dlerror());
-        return mk(env, out);
-    }
+    if (!h) { snprintf(err, cap, "JVM: dlopen(%s) не удался: %s", path, dlerror()); return -1; }
     CreateJvmFn create = (CreateJvmFn) dlsym(h, "JNI_CreateJavaVM");
-    if (!create) return mk(env, "JVM: нет символа JNI_CreateJavaVM");
+    if (!create) { snprintf(err, cap, "JVM: нет символа JNI_CreateJavaVM"); return -1; }
     int n = (*env)->GetArrayLength(env, opts);
     JavaVMOption* o = (JavaVMOption*) calloc(n, sizeof(JavaVMOption));
     for (int i = 0; i < n; i++) {
@@ -101,12 +105,15 @@ JNIEXPORT jstring JNICALL Java_dev_mclauncher_Native_startJvm(JNIEnv* env, jclas
     args.nOptions = n;
     args.options = o;
     args.ignoreUnrecognized = JNI_TRUE;
+    jint rc = create(jvm, (void**) jenv, &args);
+    if (rc != JNI_OK || !*jenv) { snprintf(err, cap, "JVM: JNI_CreateJavaVM вернул %d", (int) rc); return -1; }
+    return 0;
+}
+
+JNIEXPORT jstring JNICALL Java_dev_mclauncher_Native_startJvm(JNIEnv* env, jclass cls, jstring javaHome, jobjectArray opts) {
+    char out[2048], e[512];
     JavaVM* jvm = NULL; JNIEnv* jenv = NULL;
-    jint rc = create(&jvm, (void**) &jenv, &args);
-    if (rc != JNI_OK || !jenv) {
-        snprintf(out, sizeof out, "JVM: JNI_CreateJavaVM вернул %d", (int) rc);
-        return mk(env, out);
-    }
+    if (create_jvm(env, javaHome, opts, &jvm, &jenv, e, sizeof e) != 0) return mk(env, e);
     jclass sys = (*jenv)->FindClass(jenv, "java/lang/System");
     jmethodID gp = (*jenv)->GetStaticMethodID(jenv, sys, "getProperty", "(Ljava/lang/String;)Ljava/lang/String;");
     char ver[128], vm[128], arch[64];
@@ -116,4 +123,75 @@ JNIEXPORT jstring JNICALL Java_dev_mclauncher_Native_startJvm(JNIEnv* env, jclas
     snprintf(out, sizeof out, "JVM в процессе приложения запущена: Java %s, %s, %s", ver, vm, arch);
     LOG("%s", out);
     return mk(env, out);
+}
+
+// Запуск main(String[]) внутри процесса. Блокирует до завершения игры.
+JNIEXPORT jstring JNICALL Java_dev_mclauncher_Native_runMain(JNIEnv* env, jclass cls, jstring javaHome,
+        jobjectArray opts, jstring mainClass, jobjectArray gameArgs) {
+    char e[512];
+    JavaVM* jvm = NULL; JNIEnv* jenv = NULL;
+    if (create_jvm(env, javaHome, opts, &jvm, &jenv, e, sizeof e) != 0) return mk(env, e);
+    const char* mc = (*env)->GetStringUTFChars(env, mainClass, NULL);
+    char cname[512];
+    snprintf(cname, sizeof cname, "%s", mc);
+    for (char* c = cname; *c; c++) if (*c == '.') *c = '/';
+    jclass main = (*jenv)->FindClass(jenv, cname);
+    if (!main) { (*jenv)->ExceptionDescribe(jenv); return mk(env, "JVM: главный класс не найден"); }
+    jmethodID mm = (*jenv)->GetStaticMethodID(jenv, main, "main", "([Ljava/lang/String;)V");
+    if (!mm) { (*jenv)->ExceptionDescribe(jenv); return mk(env, "JVM: нет метода main"); }
+    int n = (*env)->GetArrayLength(env, gameArgs);
+    jclass strc = (*jenv)->FindClass(jenv, "java/lang/String");
+    jobjectArray arr = (*jenv)->NewObjectArray(jenv, n, strc, NULL);
+    for (int i = 0; i < n; i++) {
+        jstring s = (jstring) (*env)->GetObjectArrayElement(env, gameArgs, i);
+        const char* u = (*env)->GetStringUTFChars(env, s, NULL);
+        (*jenv)->SetObjectArrayElement(jenv, arr, i, (*jenv)->NewStringUTF(jenv, u));
+        (*env)->ReleaseStringUTFChars(env, s, u);
+    }
+    LOG("runMain %s", cname);
+    (*jenv)->CallStaticVoidMethod(jenv, main, mm, arr);
+    if ((*jenv)->ExceptionCheck(jenv)) { (*jenv)->ExceptionDescribe(jenv); return mk(env, "JVM: main завершился исключением"); }
+    return mk(env, "Игра завершилась");
+}
+
+JNIEXPORT void JNICALL Java_dev_mclauncher_Native_setSurface(JNIEnv* env, jclass cls, jobject surface, jint w, jint h) {
+    ANativeWindow* win = ANativeWindow_fromSurface(env, surface);
+    smc_set_surface(win, w, h);
+}
+
+JNIEXPORT void JNICALL Java_dev_mclauncher_Native_pushEvent(JNIEnv* env, jclass cls, jint type, jdouble a, jdouble b, jint c) {
+    smc_push_event(type, a, b, c);
+}
+
+JNIEXPORT void JNICALL Java_dev_mclauncher_Native_setGlLib(JNIEnv* env, jclass cls, jstring path) {
+    const char* p = (*env)->GetStringUTFChars(env, path, NULL);
+    smc_set_gl_lib(p);
+    (*env)->ReleaseStringUTFChars(env, path, p);
+}
+
+// stdout/stderr процесса -> файл (Java пишет туда логи игры)
+static int g_pipe_r = -1;
+static FILE* g_logf = NULL;
+static void* pump(void* arg) {
+    char buf[2048];
+    for (;;) {
+        ssize_t n = read(g_pipe_r, buf, sizeof buf - 1);
+        if (n <= 0) break;
+        buf[n] = 0;
+        if (g_logf) { fwrite(buf, 1, n, g_logf); fflush(g_logf); }
+        __android_log_write(ANDROID_LOG_INFO, "SimpleMC-Game", buf);
+    }
+    return NULL;
+}
+JNIEXPORT void JNICALL Java_dev_mclauncher_Native_redirectOutput(JNIEnv* env, jclass cls, jstring path) {
+    const char* p = (*env)->GetStringUTFChars(env, path, NULL);
+    g_logf = fopen(p, "w");
+    (*env)->ReleaseStringUTFChars(env, path, p);
+    int fds[2];
+    if (pipe(fds) != 0) return;
+    g_pipe_r = fds[0];
+    dup2(fds[1], 1);
+    dup2(fds[1], 2);
+    pthread_t t;
+    pthread_create(&t, NULL, pump, NULL);
 }
