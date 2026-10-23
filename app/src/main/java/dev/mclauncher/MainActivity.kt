@@ -14,6 +14,7 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.SeekBar
 import android.widget.FrameLayout
 import android.view.Gravity
 import android.graphics.Color
@@ -114,38 +115,39 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Th.light = prefs.getString("theme", "dark") == "light"
         drawerW = resources.displayMetrics.widthPixels - dp(64)
 
-        rootFrame = FrameLayout(this).apply { setBackgroundColor(0xFF0B0F0C.toInt()); fitsSystemWindows = true }
+        rootFrame = FrameLayout(this).apply { setBackgroundColor(Th.bg); fitsSystemWindows = true }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         rootFrame.addView(root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         // верхняя полоса: название по центру, лог справа (кнопка-меню рисуется поверх всего)
-        val top = FrameLayout(this).apply { setBackgroundColor(0xFF121A15.toInt()) }
+        val top = FrameLayout(this).apply { setBackgroundColor(Th.bar) }
         val titleBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        titleBox.addView(TextView(this).apply { text = "Mobilix"; textSize = 20f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER })
-        titleBox.addView(TextView(this).apply { text = versionLabel(); textSize = 11f; setTextColor(0xFF7FA08A.toInt()); gravity = Gravity.CENTER })
+        titleBox.addView(TextView(this).apply { text = "Mobilix"; textSize = 22f; setTextColor(Th.accent); gravity = Gravity.CENTER; typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); letterSpacing = 0.12f })
+        titleBox.addView(TextView(this).apply { text = versionLabel(); textSize = 11f; setTextColor(Th.dim); gravity = Gravity.CENTER })
         top.addView(titleBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56), Gravity.CENTER))
         root.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
 
         // область 3D-скина
-        val skinBox = FrameLayout(this).apply { setBackgroundColor(0xFF0E1F14.toInt()) }
+        val skinBox = FrameLayout(this).apply { setBackgroundColor(Th.skinBg) }
         skinView = SkinView(this)
         skinBox.addView(skinView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         nickText = TextView(this).apply {
-            text = nickName(); textSize = 16f; setTextColor(0xFFB8E6C4.toInt()); gravity = Gravity.CENTER
+            text = nickName(); textSize = 16f; setTextColor(Th.text2); gravity = Gravity.CENTER
             setPadding(0, 0, 0, dp(8))
         }
         skinBox.addView(nickText, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         root.addView(skinBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         // панель лога (скрыта по умолчанию)
-        logPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setBackgroundColor(0xFF121A15.toInt()) }
+        logPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setBackgroundColor(Th.bar) }
         scroll = ScrollView(this)
         logView = TextView(this).apply {
             typeface = Typeface.MONOSPACE
             textSize = 11f
-            setTextColor(0xFFB8E6C4.toInt())
+            setTextColor(Th.text2)
             setTextIsSelectable(true)
             setPadding(dp(8), 0, dp(8), 0)
         }
@@ -180,36 +182,39 @@ class MainActivity : Activity() {
         }
         rootFrame.addView(scrim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         drawer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF0F1712.toInt())
+            orientation = LinearLayout.VERTICAL; setBackgroundColor(Th.drawer)
             translationX = -drawerW.toFloat(); isClickable = true
         }
-        drawer.addView(View(this), LinearLayout.LayoutParams(1, dp(56)))
+        drawer.addView(TextView(this).apply {
+            text = "Mobilix"; textSize = 26f; setTextColor(Th.accent); gravity = Gravity.CENTER_VERTICAL
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); letterSpacing = 0.12f; setPadding(dp(72), 0, 0, 0)
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
         fun item(ru: String, en: String, onClick: () -> Unit): TextView {
             val t = TextView(this).apply {
-                text = tr(ru, en); textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(28), 0, dp(16), 0); isClickable = true; background = sel(0xFF0F1712.toInt())
+                text = tr(ru, en); textSize = 18f; setTextColor(Th.text); gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(28), 0, dp(16), 0); isClickable = true; background = sel(Th.drawer)
                 setOnClickListener { onClick() }
             }
-            drawer.addView(View(this).apply { setBackgroundColor(0xFF22332A.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
+            drawer.addView(View(this).apply { setBackgroundColor(Th.line) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
             drawer.addView(t, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)))
             return t
         }
         item("Аккаунт", "Account") { openPage(tr("Аккаунт", "Account"), accountPage()) }
-        item("Настройки", "Settings") { openPage(tr("Настройки", "Settings"), stubPage(tr("Настройки появятся позже", "Settings are coming soon"))) }
+        item("Настройки", "Settings") { openPage(tr("Настройки", "Settings"), settingsPage()) }
         item("Загрузчик версий", "Version loader") { openPage(tr("Загрузчик версий", "Version loader"), versionsPage()) }
-        item("Каталог", "Catalog") { openPage(tr("Каталог", "Catalog"), stubPage(tr("Каталог модов и ресурспаков (Modrinth) появится позже", "Mods & resource packs catalog (Modrinth) is coming soon"))) }
+        item("Каталог", "Catalog") { openPage(tr("Каталог", "Catalog"), catalogPage()) }
         item("Раскладка управления", "Controls layout") { startActivity(Intent(this, ControlsEditorActivity::class.java)) }
         menuWipe = item("Удалить скачанное", "Delete downloads") { confirmWipe() }
         item("Язык", "Language") { chooseLanguage() }
-        drawer.addView(View(this).apply { setBackgroundColor(0xFF22332A.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
+        drawer.addView(View(this).apply { setBackgroundColor(Th.line) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
         rootFrame.addView(drawer, FrameLayout.LayoutParams(drawerW, ViewGroup.LayoutParams.MATCH_PARENT))
 
         hamb = HamburgerView(this).apply { setOnClickListener { setDrawer(!drawerOpen) } }
         rootFrame.addView(hamb, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.START or Gravity.TOP))
 
         val logBtn = TextView(this).apply {
-            text = tr("Лог", "Log"); textSize = 12f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER
-            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF0F1712.toInt()); setStroke(dp(2), 0xFF2EA84F.toInt()); cornerRadius = dp(8).toFloat() }
+            text = tr("Лог", "Log"); textSize = 12f; setTextColor(Th.accent); gravity = Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(Th.drawer); setStroke(dp(2), 0xFF2EA84F.toInt()); cornerRadius = dp(8).toFloat() }
             setOnClickListener { logPanel.visibility = if (logPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
         }
         rootFrame.addView(logBtn, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.END or Gravity.TOP).apply { topMargin = dp(8); marginEnd = dp(10) })
@@ -242,14 +247,14 @@ class MainActivity : Activity() {
 
     private fun openPage(title: String, content: View) {
         pageLayer.removeAllViews()
-        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF0B0F0C.toInt()); isClickable = true }
-        val head = FrameLayout(this).apply { setBackgroundColor(0xFF121A15.toInt()) }
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Th.bg); isClickable = true }
+        val head = FrameLayout(this).apply { setBackgroundColor(Th.bar) }
         head.addView(TextView(this).apply {
-            text = "‹"; textSize = 34f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER
+            text = "‹"; textSize = 34f; setTextColor(Th.accent); gravity = Gravity.CENTER
             setOnClickListener { closePage() }
         }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.START))
         head.addView(TextView(this).apply {
-            text = title; textSize = 19f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER
+            text = title; textSize = 19f; setTextColor(Th.accent); gravity = Gravity.CENTER
         }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56), Gravity.CENTER))
         page.addView(head, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
         page.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -280,7 +285,7 @@ class MainActivity : Activity() {
     }
 
     private fun stubPage(text: String) = FrameLayout(this).apply {
-        addView(TextView(context).apply { this.text = text; textSize = 16f; setTextColor(0xFF7FA08A.toInt()); gravity = Gravity.CENTER; setPadding(dp(32), 0, dp(32), 0) },
+        addView(TextView(context).apply { this.text = text; textSize = 16f; setTextColor(Th.dim); gravity = Gravity.CENTER; setPadding(dp(32), 0, dp(32), 0) },
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
@@ -290,6 +295,181 @@ class MainActivity : Activity() {
                 prefs.edit().putString("lang", if (i == 1) "en" else "ru").apply()
                 recreate()
             }.show()
+    }
+
+    // ---------- настройки ----------
+    private fun header(t: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL; setPadding(0, dp(22), 0, dp(8))
+        addView(TextView(context).apply { text = t; textSize = 20f; setTextColor(Th.accent) })
+        addView(View(context).apply { setBackgroundColor(0xFF2EA84F.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)).apply { topMargin = dp(4) })
+    }
+
+    private fun chipRow(labels: List<String>, selected: Int, onPick: (Int) -> Unit): LinearLayout {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val views = ArrayList<TextView>()
+        fun paint(sel: Int) = views.forEachIndexed { i, t -> t.setBackgroundColor(if (i == sel) 0xFF2EA84F.toInt() else 0xFF14301D.toInt()) }
+        labels.forEachIndexed { i, l ->
+            val t = TextView(this).apply {
+                text = l; textSize = 14f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; setPadding(dp(14), dp(10), dp(14), dp(10))
+                setOnClickListener { paint(i); onPick(i) }
+            }
+            views.add(t)
+            row.addView(t, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
+        }
+        paint(selected)
+        return row
+    }
+
+    private fun note(t: String) = TextView(this).apply { text = t; textSize = 12f; setTextColor(Th.dim); setPadding(0, dp(6), 0, 0) }
+
+    private fun settingsPage(): View {
+        val sv = ScrollView(this)
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), dp(24)) }
+        col.addView(header(tr("Лаунчер", "Launcher")))
+        col.addView(TextView(this).apply { text = tr("Тема", "Theme"); setTextColor(Th.text); setPadding(0, 0, 0, dp(6)) })
+        col.addView(chipRow(listOf(tr("Тёмная", "Dark"), tr("Светлая", "Light")), if (Th.light) 1 else 0) { i ->
+            prefs.edit().putString("theme", if (i == 1) "light" else "dark").apply()
+            recreate()
+        })
+        col.addView(header(tr("Игра", "Game")))
+        val cur = prefs.getInt("renderScale", 100)
+        val lbl = TextView(this).apply { text = tr("Разрешение рендера: $cur%", "Render resolution: $cur%"); setTextColor(Th.text) }
+        col.addView(lbl)
+        col.addView(SeekBar(this).apply {
+            max = 70; progress = cur - 30
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, u: Boolean) { lbl.text = tr("Разрешение рендера: ${p + 30}%", "Render resolution: ${p + 30}%") }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {
+                    val v = (sb?.progress ?: 70) + 30
+                    prefs.edit().putInt("renderScale", v).apply()
+                    try { File(filesDir, "game_settings.json").writeText(JSONObject().put("renderScale", v).toString()) } catch (_: Exception) {}
+                }
+            })
+        })
+        col.addView(note(tr("Игра рисуется в меньшем разрешении и растягивается на весь экран: меньше нагрузка на GPU, выше FPS. Размытия нет, это именно снижение числа пикселей. Применяется при следующем запуске.",
+            "The game renders at a lower resolution and is scaled to the full screen: lower GPU load, higher FPS. Applied on next launch.")))
+        col.addView(header(tr("Специальное", "Special")))
+        col.addView(TextView(this).apply { text = tr("Источник каталога", "Catalog source"); setTextColor(Th.text); setPadding(0, 0, 0, dp(6)) })
+        col.addView(chipRow(listOf("Modrinth", "Modrinth Black"), prefs.getInt("modSource", 2) - 1) { i -> prefs.edit().putInt("modSource", i + 1).apply() })
+        col.addView(TextView(this).apply { text = tr("Адрес API зеркала", "Mirror API address"); setTextColor(Th.text); setPadding(0, dp(14), 0, 0) })
+        col.addView(android.widget.EditText(this).apply {
+            setText(prefs.getString("mirrorApi", "https://api.modrinth.black/v2")); setTextColor(Th.text); setSingleLine(true)
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun afterTextChanged(e: android.text.Editable?) { prefs.edit().putString("mirrorApi", e.toString().trim()).apply() }
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            })
+        })
+        col.addView(note(tr("Если Modrinth недоступен, выберите Modrinth Black. Если зеркало не отвечает, поправьте адрес API здесь.",
+            "If Modrinth is unreachable, choose Modrinth Black. If the mirror does not respond, fix the API address here.")))
+        sv.addView(col)
+        return sv
+    }
+
+    // ---------- каталог (Modrinth) ----------
+    private fun apiBases(): List<String> {
+        val official = "https://api.modrinth.com/v2"
+        val mirror = (prefs.getString("mirrorApi", "https://api.modrinth.black/v2") ?: official).trimEnd('/')
+        return if (prefs.getInt("modSource", 2) == 2) listOf(mirror, official) else listOf(official, mirror)
+    }
+
+    private fun apiGet(path: String): String {
+        var err: Throwable? = null
+        for (b in apiBases()) {
+            try {
+                val c = URL(b + path).openConnection() as HttpURLConnection
+                c.connectTimeout = 12000; c.readTimeout = 25000
+                c.setRequestProperty("User-Agent", "Kumolix/Mobilix/1.4 (Android launcher)")
+                if (c.responseCode in 200..299) return c.inputStream.bufferedReader().use { it.readText() }
+                err = RuntimeException("HTTP ${c.responseCode}")
+            } catch (e: Throwable) { err = e }
+        }
+        throw err ?: RuntimeException("нет ответа")
+    }
+
+    private fun catalogPage(): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var type = "mod"; var loader = "fabric"
+        val q = android.widget.EditText(this).apply {
+            hint = tr("Поиск", "Search"); setHintTextColor(Th.hint); setTextColor(Th.text); setSingleLine(true)
+            setPadding(dp(20), dp(12), dp(20), dp(12)); imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+        }
+        box.addView(q)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), dp(24)) }
+        fun search() {
+            list.removeAllViews()
+            list.addView(TextView(this).apply { text = tr("Загрузка…", "Loading…"); setTextColor(Th.dim); setPadding(0, dp(16), 0, 0) })
+            val query = q.text.toString().trim()
+            Thread {
+                try {
+                    val facets = JSONArray().put(JSONArray().put("versions:$VERSION")).put(JSONArray().put("project_type:$type"))
+                    if (type == "mod") facets.put(JSONArray().put("categories:$loader"))
+                    val path = "/search?query=" + java.net.URLEncoder.encode(query, "UTF-8") +
+                        "&facets=" + java.net.URLEncoder.encode(facets.toString(), "UTF-8") + "&limit=25&index=" + (if (query.isEmpty()) "downloads" else "relevance")
+                    val hits = JSONObject(apiGet(path)).getJSONArray("hits")
+                    runOnUiThread {
+                        list.removeAllViews()
+                        if (hits.length() == 0) list.addView(TextView(this).apply { text = tr("Ничего не найдено", "Nothing found"); setTextColor(Th.dim); setPadding(0, dp(16), 0, 0) })
+                        for (i in 0 until hits.length()) {
+                            val h = hits.getJSONObject(i)
+                            val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, dp(10)) }
+                            row.addView(TextView(this).apply { text = h.getString("title"); textSize = 17f; setTextColor(Th.text); typeface = Typeface.DEFAULT_BOLD })
+                            row.addView(TextView(this).apply { text = h.optString("author") + "  ·  ⬇ " + h.optInt("downloads"); textSize = 12f; setTextColor(Th.accent) })
+                            row.addView(TextView(this).apply { text = h.optString("description"); textSize = 13f; setTextColor(Th.text2); maxLines = 3 })
+                            val btn = Button(this).apply {
+                                text = tr("Скачать", "Download"); isAllCaps = false; setTextColor(Color.WHITE); background = sel(0xFF2EA84F.toInt())
+                            }
+                            btn.setOnClickListener { installProject(h.getString("project_id"), type, loader, btn) }
+                            row.addView(btn, LinearLayout.LayoutParams(dp(150), dp(40)).apply { topMargin = dp(6) })
+                            list.addView(row)
+                            list.addView(View(this).apply { setBackgroundColor(Th.line2) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
+                        }
+                    }
+                } catch (e: Throwable) {
+                    runOnUiThread {
+                        list.removeAllViews()
+                        list.addView(TextView(this).apply { text = tr("Не удалось загрузить каталог: ", "Could not load the catalog: ") + e.message + tr("\nПроверьте источник в Настройки → Специальное.", "\nCheck the source in Settings → Special."); setTextColor(Th.dim); setPadding(0, dp(16), 0, 0) })
+                    }
+                }
+            }.start()
+        }
+        val types = listOf("mod" to tr("Моды", "Mods"), "resourcepack" to tr("Ресурспаки", "Resource packs"), "shader" to tr("Шейдеры", "Shaders"))
+        box.addView(chipRow(types.map { it.second }, 0) { i -> type = types[i].first; search() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12); bottomMargin = dp(6) })
+        val loaders = listOf("fabric", "forge", "neoforge", "quilt")
+        box.addView(chipRow(loaders.map { it.replaceFirstChar { c -> c.uppercase() } }, 0) { i -> loader = loaders[i]; if (type == "mod") search() },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12); bottomMargin = dp(6) })
+        val sv = ScrollView(this); sv.addView(list)
+        box.addView(sv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        q.setOnEditorActionListener { _, _, _ -> search(); true }
+        search()
+        return box
+    }
+
+    private fun installProject(id: String, type: String, loader: String, btn: Button) {
+        btn.isEnabled = false; btn.alpha = 0.6f; btn.text = tr("Скачивание…", "Downloading…")
+        Thread {
+            var res = ""
+            try {
+                val g = "?game_versions=" + java.net.URLEncoder.encode("[\"$VERSION\"]", "UTF-8") +
+                    (if (type == "mod") "&loaders=" + java.net.URLEncoder.encode("[\"$loader\"]", "UTF-8") else "")
+                val vers = JSONArray(apiGet("/project/$id/version$g"))
+                if (vers.length() == 0) throw RuntimeException(tr("нет файла для $VERSION", "no file for $VERSION"))
+                val files = vers.getJSONObject(0).getJSONArray("files")
+                var f = files.getJSONObject(0)
+                for (i in 0 until files.length()) if (files.getJSONObject(i).optBoolean("primary")) f = files.getJSONObject(i)
+                val dir = when (type) { "resourcepack" -> "resourcepacks"; "shader" -> "shaderpacks"; else -> "mods" }
+                val root = getExternalFilesDir(null) ?: filesDir
+                val dest = File(File(root, "game"), "$dir/" + f.getString("filename"))
+                val ok = download(f.getString("url"), dest, f.optJSONObject("hashes")?.optString("sha1")?.ifEmpty { null })
+                if (!ok) throw RuntimeException(tr("ошибка загрузки", "download failed"))
+                res = "ok"
+            } catch (e: Throwable) { res = e.message ?: e.toString() }
+            runOnUiThread {
+                if (res == "ok") { btn.text = tr("✓ Скачано", "✓ Downloaded") }
+                else { btn.isEnabled = true; btn.alpha = 1f; btn.text = tr("Скачать", "Download"); Toast.makeText(this, res, Toast.LENGTH_LONG).show() }
+            }
+        }.start()
     }
 
     // ---------- аккаунт ----------
@@ -305,7 +485,7 @@ class MainActivity : Activity() {
         }
         val sw = android.widget.Switch(this).apply {
             text = tr("Стройный скин (руки 3 px)", "Slim skin (3 px arms)")
-            setTextColor(Color.WHITE); isChecked = prefs.getBoolean("slim", false)
+            setTextColor(Th.text); isChecked = prefs.getBoolean("slim", false)
             setOnCheckedChangeListener { _, on ->
                 prefs.edit().putBoolean("slim", on).apply()
                 skin.slim = on; skinView.slim = on
@@ -322,10 +502,10 @@ class MainActivity : Activity() {
             skinFile()?.let { accountSkin?.setSkin(android.graphics.BitmapFactory.decodeFile(it.path)) }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
         col.addView(TextView(this).apply {
-            text = tr("Ник (офлайн-режим)", "Nickname (offline mode)"); textSize = 14f; setTextColor(0xFF7FA08A.toInt()); setPadding(0, dp(24), 0, dp(4))
+            text = tr("Ник (офлайн-режим)", "Nickname (offline mode)"); textSize = 14f; setTextColor(Th.dim); setPadding(0, dp(24), 0, dp(4))
         })
         val nick = android.widget.EditText(this).apply {
-            setText(nickName()); setTextColor(Color.WHITE); setSingleLine(true)
+            setText(nickName()); setTextColor(Th.text); setSingleLine(true)
             filters = arrayOf(android.text.InputFilter.LengthFilter(16))
         }
         col.addView(nick)
@@ -352,7 +532,7 @@ class MainActivity : Activity() {
         col.addView(TextView(this).apply {
             text = tr("Скин применяется и в игре: лаунчер подставляет его как стандартный скин (ресурспак Mobilix-skin). Ширина рук в игре зависит от UUID игрока.",
                 "The skin is also applied in-game as the default skin (Mobilix-skin resource pack). Arm width in-game depends on the player UUID.")
-            textSize = 12f; setTextColor(0xFF7FA08A.toInt()); setPadding(0, dp(16), 0, 0)
+            textSize = 12f; setTextColor(Th.dim); setPadding(0, dp(16), 0, 0)
         })
         sv.addView(col)
         return sv
@@ -390,7 +570,7 @@ class MainActivity : Activity() {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val filter = android.widget.EditText(this).apply {
             hint = tr("Нужная версия (например 1.21)", "Needed version (e.g. 1.21)")
-            setHintTextColor(0xFF58705F.toInt()); setTextColor(Color.WHITE); setSingleLine(true)
+            setHintTextColor(Th.hint); setTextColor(Th.text); setSingleLine(true)
             setPadding(dp(20), dp(12), dp(20), dp(12))
         }
         box.addView(filter)
@@ -412,7 +592,7 @@ class MainActivity : Activity() {
         fun render() {
             list.removeAllViews()
             if (!loaded) {
-                list.addView(TextView(this).apply { text = tr("Загрузка списка…", "Loading list…"); setTextColor(0xFF7FA08A.toInt()); setPadding(0, dp(16), 0, 0) })
+                list.addView(TextView(this).apply { text = tr("Загрузка списка…", "Loading list…"); setTextColor(Th.dim); setPadding(0, dp(16), 0, 0) })
                 return
             }
             val q = filter.text.toString().trim()
@@ -420,12 +600,12 @@ class MainActivity : Activity() {
                 if (loader != "all" && loader != key) return
                 val f = items.filter { q.isEmpty() || it.contains(q) }
                 if (f.isEmpty()) return
-                list.addView(TextView(this).apply { text = name; textSize = 20f; setTextColor(0xFF43E06A.toInt()); setPadding(0, dp(18), 0, dp(6)) })
+                list.addView(TextView(this).apply { text = name; textSize = 20f; setTextColor(Th.accent); setPadding(0, dp(18), 0, dp(6)) })
                 list.addView(View(this).apply { setBackgroundColor(0xFF2EA84F.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)))
                 for (v in f) {
                     val inst = key == "vanilla" && installed.contains(v)
                     val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
-                    r.addView(TextView(this).apply { text = v; textSize = 17f; setTextColor(Color.WHITE) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    r.addView(TextView(this).apply { text = v; textSize = 17f; setTextColor(Th.text) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                     r.addView(Button(this).apply {
                         text = if (inst) tr("Установлена", "Installed") else tr("Скачать", "Download")
                         isAllCaps = false; textSize = 12f; setTextColor(Color.WHITE)
@@ -438,11 +618,11 @@ class MainActivity : Activity() {
                         }
                     }, LinearLayout.LayoutParams(dp(120), dp(40)))
                     list.addView(r)
-                    list.addView(View(this).apply { setBackgroundColor(0xFF1B2A20.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
+                    list.addView(View(this).apply { setBackgroundColor(Th.line2) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
                 }
             }
             section("Vanilla", vanilla, "vanilla"); section("Fabric", fabric, "fabric"); section("Forge", forge, "forge")
-            if (list.childCount == 0) list.addView(TextView(this).apply { text = tr("Ничего не найдено", "Nothing found"); setTextColor(0xFF7FA08A.toInt()); setPadding(0, dp(16), 0, 0) })
+            if (list.childCount == 0) list.addView(TextView(this).apply { text = tr("Ничего не найдено", "Nothing found"); setTextColor(Th.dim); setPadding(0, dp(16), 0, 0) })
         }
 
         val chipViews = ArrayList<Pair<String, TextView>>()
@@ -506,9 +686,9 @@ class MainActivity : Activity() {
         if (!installed.contains(VERSION)) installed.add(0, VERSION)
         val pm = android.widget.PopupMenu(this, anchor, Gravity.END)
         installed.forEachIndexed { i, v -> pm.menu.add(0, i, i, v + if (v == VERSION) "  ✓" else "") }
-        pm.menu.add(1, 100, 100, "＋ Загрузить другую версию…")
+        pm.menu.add(1, 100, 100, tr("＋ Загрузить другую версию…", "＋ Download another version…"))
         pm.setOnMenuItemClickListener {
-            if (it.itemId == 100) Toast.makeText(this, "Скоро: выбор и загрузка других версий", Toast.LENGTH_SHORT).show()
+            if (it.itemId == 100) openPage(tr("Загрузчик версий", "Version loader"), versionsPage())
             true
         }
         pm.show()
@@ -1277,7 +1457,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun download(url: String, dest: File, sha1: String?): Boolean {
+    internal fun download(url: String, dest: File, sha1: String?): Boolean {
         if (dest.exists() && dest.length() > 0) return true
         dest.parentFile?.mkdirs()
         val tmp = File(dest.path + ".part")

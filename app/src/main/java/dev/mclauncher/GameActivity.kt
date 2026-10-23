@@ -66,6 +66,10 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
         sv.holder.addCallback(this)
         root.addView(sv, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         val controls = ControlsView(this)
+        run {
+            val sc = renderScale()
+            controls.gameScale = sc / 100f
+        }
         root.addView(controls, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         logView = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -160,7 +164,19 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
     private fun say(s: String) = runOnUiThread { logView.append(s + "\n") }
 
     // ---------- поверхность ----------
-    override fun surfaceCreated(holder: SurfaceHolder) {}
+    private fun renderScale(): Int = try {
+        JSONObject(File(filesDir, "game_settings.json").readText()).optInt("renderScale", 100).coerceIn(30, 100)
+    } catch (_: Throwable) { 100 }
+
+    override fun surfaceCreated(holder: SurfaceHolder) {
+        val sc = renderScale()
+        if (sc < 100) {
+            val dm = resources.displayMetrics
+            val w = maxOf(dm.widthPixels, dm.heightPixels) * sc / 100
+            val h = minOf(dm.widthPixels, dm.heightPixels) * sc / 100
+            holder.setFixedSize(w, h)
+        }
+    }
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         if (mode == "game" && started) {
             try {

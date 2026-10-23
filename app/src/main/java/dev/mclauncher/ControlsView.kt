@@ -22,6 +22,7 @@ const val K_KEY = 0
 const val K_MOUSE = 1
 const val K_SCROLL = 2
 const val K_KEYBOARD = 3
+const val K_HIDE = 4
 
 class Btn(
     var label: String, var kind: Int, var code: Int,
@@ -39,6 +40,7 @@ private val KEY_CHOICES: List<Triple<String, Int, Int>> = buildList {
     add(Triple("Мышь: правая (ставить/использовать)", K_MOUSE, 1))
     add(Triple("Мышь: средняя", K_MOUSE, 2))
     add(Triple("Экранная клавиатура", K_KEYBOARD, 0))
+    add(Triple("Скрыть/показать кнопки", K_HIDE, 0))
     add(Triple("Колесо вверх", K_SCROLL, 1))
     add(Triple("Колесо вниз", K_SCROLL, -1))
     add(Triple("Пробел", K_KEY, 32)); add(Triple("Esc", K_KEY, 256)); add(Triple("Enter", K_KEY, 257))
@@ -63,6 +65,8 @@ class ControlsView(ctx: Context) : View(ctx) {
     private val d = ctx.resources.displayMetrics.density
     val buttons = ArrayList<Btn>()
     var sens = 1.0f
+    var gameScale = 1f
+    private var hidden = false
     var editing = false
         set(v) { field = v; if (!v) save(); invalidate() }
 
@@ -96,9 +100,9 @@ class ControlsView(ctx: Context) : View(ctx) {
         k("Присед", 340, 0.77f, 0.91f, 56, 56, true)
         k("Бег", 341, 0.27f, 0.70f, 56)
         // верхний ряд
-        buttons.add(Btn("⌨", K_KEYBOARD, 0, 0.12f, 0.07f, 40, 40)); k("F3", 292, 0.19f, 0.07f, 40)
-        k("GUI", 290, 0.035f, 0.09f, 40)
-        k("F5", 294, 0.26f, 0.07f, 40); k("Чат", 'T'.code, 0.33f, 0.07f, 40); k("Esc", 256, 0.40f, 0.07f, 40)
+        buttons.add(Btn("⌨", K_KEYBOARD, 0, 0.12f, 0.07f, 40, 40)); k("F3", 292, 0.33f, 0.07f, 40)
+        buttons.add(Btn("GUI", K_HIDE, 0, 0.035f, 0.09f, 40, 40))
+        k("F5", 294, 0.26f, 0.07f, 40); k("Чат", 'T'.code, 0.19f, 0.07f, 40); k("Esc", 256, 0.40f, 0.07f, 40)
         k("Инв.", 'E'.code, 0.47f, 0.07f, 40); k("Бросить", 'Q'.code, 0.54f, 0.07f, 40)
         // хотбар
         for (i in 1..9) k(i.toString(), 48 + i, 0.335f + (i - 1) * 0.041f, 0.94f, 34)
@@ -109,7 +113,7 @@ class ControlsView(ctx: Context) : View(ctx) {
         try {
             val a = JSONArray()
             buttons.forEach { a.put(it.toJson()) }
-            file.writeText(JSONObject().put("v", 3).put("sens", sens.toDouble()).put("buttons", a).toString())
+            file.writeText(JSONObject().put("v", 4).put("sens", sens.toDouble()).put("buttons", a).toString())
         } catch (_: Throwable) {
         }
     }
@@ -129,6 +133,7 @@ class ControlsView(ctx: Context) : View(ctx) {
                 val ver = j.optInt("v", 0)
                 if (ver < 2) migrate()
                 if (ver < 3) addNew()
+                if (ver < 4) migrate4()
                 if (buttons.isNotEmpty()) return
             }
         } catch (_: Throwable) {
@@ -158,6 +163,15 @@ class ControlsView(ctx: Context) : View(ctx) {
         save()
     }
 
+    /** Версия 4: GUI скрывает кнопки (не F1), чат и F3 поменялись местами. */
+    private fun migrate4() {
+        buttons.filter { it.kind == K_KEY && it.code == 290 && it.label == "GUI" }.forEach { it.kind = K_HIDE; it.code = 0 }
+        val f3 = buttons.firstOrNull { it.kind == K_KEY && it.code == 292 }
+        val chat = buttons.firstOrNull { it.kind == K_KEY && it.code == 'T'.code }
+        if (f3 != null && chat != null && f3.cx < chat.cx) { val t = f3.cx; f3.cx = chat.cx; chat.cx = t }
+        save()
+    }
+
     fun reset() { defaults(); save(); invalidate() }
 
     // ---------- отрисовка ----------
@@ -168,6 +182,7 @@ class ControlsView(ctx: Context) : View(ctx) {
 
     override fun onDraw(c: Canvas) {
         for (b in buttons) {
+            if (hidden && !editing && b.kind != K_HIDE) continue
             val r = rect(b)
             fill.color = if (b.pressed || b.on) 0xAAFFFFFF.toInt() else if (editing) 0x66FFD54F else 0x44FFFFFF
             c.drawRoundRect(r, 14f * d, 14f * d, fill)
@@ -186,7 +201,7 @@ class ControlsView(ctx: Context) : View(ctx) {
     // ---------- события ----------
     private fun cursorDisabled() = try { Native.cursorMode() == 0x34003 } catch (_: Throwable) { false }
 
-    private fun hit(x: Float, y: Float): Btn? = buttons.lastOrNull { rect(it).contains(x, y) }
+    private fun hit(x: Float, y: Float): Btn? = buttons.lastOrNull { (!hidden || editing || it.kind == K_HIDE) && rect(it).contains(x, y) }
 
     private var kbd = false
     private fun pk(type: Int, a: Int) { try { Native.pushEvent(type, a.toDouble(), 0.0, 0) } catch (_: Throwable) {} }
@@ -234,6 +249,7 @@ class ControlsView(ctx: Context) : View(ctx) {
     }
 
     private fun fire(b: Btn, down: Boolean) {
+        if (b.kind == K_HIDE) { if (down && !editing) { hidden = !hidden; invalidate() }; return }
         if (b.kind == K_KEYBOARD) { if (down && !editing) toggleKeyboard(); return }
         try {
             when (b.kind) {
@@ -270,7 +286,7 @@ class ControlsView(ctx: Context) : View(ctx) {
                     owners[id] = Owner.Cam(x, y)
                 } else {
                     owners[id] = Owner.Gui
-                    vx = x.toDouble(); vy = y.toDouble()
+                    vx = x.toDouble() * gameScale; vy = y.toDouble() * gameScale
                     try { Native.pushEvent(3, vx, vy, 0); Native.pushEvent(4, 0.0, 0.0, 1) } catch (_: Throwable) {}
                 }
             }
@@ -292,7 +308,7 @@ class ControlsView(ctx: Context) : View(ctx) {
                             try { Native.pushEvent(3, vx, vy, 0) } catch (_: Throwable) {}
                         }
                         is Owner.Gui -> if (!editing) {
-                            try { Native.pushEvent(3, x.toDouble(), y.toDouble(), 0) } catch (_: Throwable) {}
+                            try { Native.pushEvent(3, x.toDouble() * gameScale, y.toDouble() * gameScale, 0) } catch (_: Throwable) {}
                         }
                     }
                 }
@@ -303,7 +319,7 @@ class ControlsView(ctx: Context) : View(ctx) {
                 when (o) {
                     is Owner.B -> if (editing) { if (!o.moved) editButton(o.b) else save() } else if (!o.b.toggle) press(o.b, false)
                     is Owner.Gui -> if (!editing) {
-                        try { Native.pushEvent(3, x.toDouble(), y.toDouble(), 0); Native.pushEvent(4, 0.0, 0.0, 0) } catch (_: Throwable) {}
+                        try { Native.pushEvent(3, x.toDouble() * gameScale, y.toDouble() * gameScale, 0); Native.pushEvent(4, 0.0, 0.0, 0) } catch (_: Throwable) {}
                     }
                     else -> {}
                 }
