@@ -88,10 +88,10 @@ class ControlsView(ctx: Context) : View(ctx) {
         k("▲", 'W'.code, 0.13f, 0.60f, 56); k("▼", 'S'.code, 0.13f, 0.88f, 56)
         k("◀", 'A'.code, 0.065f, 0.74f, 56); k("▶", 'D'.code, 0.195f, 0.74f, 56)
         // действия справа
-        buttons.add(Btn("Бить", K_MOUSE, 0, 0.89f, 0.60f, 76, 76))
-        buttons.add(Btn("Ставить", K_MOUSE, 1, 0.77f, 0.76f, 76, 76))
-        k("Прыжок", 32, 0.91f, 0.84f, 64)
-        k("Присед", 340, 0.27f, 0.88f, 56, 56, true)
+        buttons.add(Btn("Бить", K_MOUSE, 0, 0.77f, 0.73f, 76, 76))
+        buttons.add(Btn("Ставить", K_MOUSE, 1, 0.89f, 0.60f, 76, 76))
+        k("Прыжок", 32, 0.91f, 0.84f, 88)
+        k("Присед", 340, 0.77f, 0.91f, 56, 56, true)
         k("Бег", 341, 0.27f, 0.70f, 56)
         // верхний ряд
         k("F5", 294, 0.26f, 0.07f, 40); k("Чат", 'T'.code, 0.33f, 0.07f, 40); k("Esc", 256, 0.40f, 0.07f, 40)
@@ -105,7 +105,7 @@ class ControlsView(ctx: Context) : View(ctx) {
         try {
             val a = JSONArray()
             buttons.forEach { a.put(it.toJson()) }
-            file.writeText(JSONObject().put("sens", sens.toDouble()).put("buttons", a).toString())
+            file.writeText(JSONObject().put("v", 2).put("sens", sens.toDouble()).put("buttons", a).toString())
         } catch (_: Throwable) {
         }
     }
@@ -122,11 +122,26 @@ class ControlsView(ctx: Context) : View(ctx) {
                     buttons.add(Btn(o.getString("l"), o.getInt("k"), o.getInt("c"), o.getDouble("x").toFloat(),
                         o.getDouble("y").toFloat(), o.getInt("w"), o.getInt("h"), o.optBoolean("t")))
                 }
+                if (!j.has("v")) migrate()
                 if (buttons.isNotEmpty()) return
             }
         } catch (_: Throwable) {
         }
         defaults()
+    }
+
+    /** Перенос старой раскладки: бить/ставить местами, бить чуть выше, присед под ним, прыжок крупнее. */
+    private fun migrate() {
+        val atk = buttons.firstOrNull { it.kind == K_MOUSE && it.code == 0 }
+        val use = buttons.firstOrNull { it.kind == K_MOUSE && it.code == 1 }
+        if (atk != null && use != null) {
+            val ax = atk.cx; val ay = atk.cy
+            atk.cx = use.cx; atk.cy = use.cy - 0.03f
+            use.cx = ax; use.cy = ay
+            buttons.firstOrNull { it.kind == K_KEY && it.code == 340 }?.let { it.cx = atk.cx; it.cy = 0.91f }
+        }
+        buttons.firstOrNull { it.kind == K_KEY && it.code == 32 }?.let { it.w = 88; it.h = 88 }
+        save()
     }
 
     fun reset() { defaults(); save(); invalidate() }
