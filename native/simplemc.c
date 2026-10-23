@@ -220,3 +220,5 @@ JNIEXPORT void JNICALL Java_dev_mclauncher_Native_redirectOutput(JNIEnv* env, jc
 
 extern void smc_surface_lost(void);
 JNIEXPORT void JNICALL Java_dev_mclauncher_Native_surfaceLost(JNIEnv* env, jclass cls) { smc_surface_lost(); }
+extern int smc_cursor_mode(void);
+JNIEXPORT jint JNICALL Java_dev_mclauncher_Native_cursorMode(JNIEnv* env, jclass cls) { return smc_cursor_mode(); }

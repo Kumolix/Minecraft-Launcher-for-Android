@@ -298,3 +298,5 @@ EXPORT int glfwCreateWindowSurface(void* i, void* w, const void* a, void* s) { (
 EXPORT float glfwGetWindowOpacity(void* w) { (void)w; return 1.0f; }
 EXPORT void glfwSetWindowOpacity(void* w, float o) { (void)w; (void)o; }
 EXPORT const char* glfwGetWindowTitle(void* w) { (void)w; return "Minecraft"; }
+
+EXPORT int smc_cursor_mode(void) { return G.cursor_mode; }

@@ -37,6 +37,7 @@ object Native {
     @JvmStatic external fun redirectOutput(path: String)
     @JvmStatic external fun chdir(path: String)
     @JvmStatic external fun surfaceLost()
+    @JvmStatic external fun cursorMode(): Int
     @JvmStatic external fun runMain(javaHome: String, options: Array<String>, mainClass: String, args: Array<String>): String
 }
 
@@ -63,6 +64,8 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
         val sv = SurfaceView(this)
         sv.holder.addCallback(this)
         root.addView(sv, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        val controls = ControlsView(this)
+        root.addView(controls, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         logView = TextView(this).apply {
             setTextColor(Color.WHITE)
             setBackgroundColor(0x66000000)
@@ -90,8 +93,28 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
                 text = if (show) "Скрыть лог" else "Показать лог"
             }
         }
+        val editBtns = ArrayList<Button>()
+        fun eb(t: String, f: () -> Unit) = Button(this).apply {
+            text = t; textSize = 11f; visibility = View.GONE
+            setOnClickListener { f() }
+            editBtns.add(this)
+        }
+        val layoutBtn = Button(this).apply {
+            text = "Раскладка"
+            textSize = 11f
+            setOnClickListener {
+                val on = !controls.editing
+                controls.editing = on
+                text = if (on) "Готово" else "Раскладка"
+                editBtns.forEach { it.visibility = if (on) View.VISIBLE else View.GONE }
+            }
+        }
         val bar = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
+            addView(eb("+ Кнопка") { controls.newButton() })
+            addView(eb("Камера") { controls.cameraDialog() })
+            addView(eb("Сброс") { controls.reset() })
+            addView(layoutBtn)
             addView(toggle)
             addView(copy)
         }
@@ -253,26 +276,6 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
     }
 
     // ---------- ввод ----------
-    override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (mode != "game") return super.onTouchEvent(e)
-        val x = e.x.toDouble()
-        val y = e.y.toDouble()
-        try {
-            when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    Native.pushEvent(3, x, y, 0)
-                    Native.pushEvent(4, 0.0, 0.0, 1)
-                }
-                MotionEvent.ACTION_MOVE -> Native.pushEvent(3, x, y, 0)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    Native.pushEvent(3, x, y, 0)
-                    Native.pushEvent(4, 0.0, 0.0, 0)
-                }
-            }
-        } catch (_: Throwable) {
-        }
-        return true
-    }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
