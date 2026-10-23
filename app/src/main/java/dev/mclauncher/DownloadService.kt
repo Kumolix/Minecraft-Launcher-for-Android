@@ -22,7 +22,7 @@ class DownloadService : Service() {
             nm.createNotificationChannel(NotificationChannel("dl", "Загрузка", NotificationManager.IMPORTANCE_LOW))
         }
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "dl") else Notification.Builder(this)
-        val n = b.setContentTitle("SimpleMC")
+        val n = b.setContentTitle("Mobilix")
             .setContentText("Скачивание файлов игры…")
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)

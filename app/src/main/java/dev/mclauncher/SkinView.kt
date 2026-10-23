@@ -32,22 +32,24 @@ class SkinView(ctx: Context) : View(ctx) {
         val u: Int, val v: Int, val infl: Float, val over: Boolean
     )
 
-    private val parts: List<Part> = listOf(
+    var slim = false
+        set(v) { field = v; postInvalidate() }
+    private val parts: List<Part> get() { val aw = if (slim) 3f else 4f; val ax = 4f + aw / 2f; return listOf(
         // база: голова, тело, руки, ноги
         Part(0f, 28f, 8f, 8f, 8f, 0, 0, 0f, false),
         Part(0f, 18f, 8f, 12f, 4f, 16, 16, 0f, false),
-        Part(-6f, 18f, 4f, 12f, 4f, 40, 16, 0f, false),
-        Part(6f, 18f, 4f, 12f, 4f, 32, 48, 0f, false),
+        Part(-ax, 18f, aw, 12f, 4f, 40, 16, 0f, false),
+        Part(ax, 18f, aw, 12f, 4f, 32, 48, 0f, false),
         Part(-2f, 6f, 4f, 12f, 4f, 0, 16, 0f, false),
         Part(2f, 6f, 4f, 12f, 4f, 16, 48, 0f, false),
         // второй слой: шапка, куртка, рукава, штаны
         Part(0f, 28f, 8f, 8f, 8f, 32, 0, 0.5f, true),
         Part(0f, 18f, 8f, 12f, 4f, 16, 32, 0.25f, true),
-        Part(-6f, 18f, 4f, 12f, 4f, 40, 32, 0.25f, true),
-        Part(6f, 18f, 4f, 12f, 4f, 48, 48, 0.25f, true),
+        Part(-ax, 18f, aw, 12f, 4f, 40, 32, 0.25f, true),
+        Part(ax, 18f, aw, 12f, 4f, 48, 48, 0.25f, true),
         Part(-2f, 6f, 4f, 12f, 4f, 0, 32, 0.25f, true),
         Part(2f, 6f, 4f, 12f, 4f, 0, 48, 0.25f, true)
-    )
+    ) }
 
     private class Face(val pts: FloatArray, val src: FloatArray, val rect: Rect, val depth: Float)
 

@@ -21,6 +21,7 @@ import java.io.File
 const val K_KEY = 0
 const val K_MOUSE = 1
 const val K_SCROLL = 2
+const val K_KEYBOARD = 3
 
 class Btn(
     var label: String, var kind: Int, var code: Int,
@@ -37,6 +38,7 @@ private val KEY_CHOICES: List<Triple<String, Int, Int>> = buildList {
     add(Triple("Мышь: левая (ломать/бить)", K_MOUSE, 0))
     add(Triple("Мышь: правая (ставить/использовать)", K_MOUSE, 1))
     add(Triple("Мышь: средняя", K_MOUSE, 2))
+    add(Triple("Экранная клавиатура", K_KEYBOARD, 0))
     add(Triple("Колесо вверх", K_SCROLL, 1))
     add(Triple("Колесо вниз", K_SCROLL, -1))
     add(Triple("Пробел", K_KEY, 32)); add(Triple("Esc", K_KEY, 256)); add(Triple("Enter", K_KEY, 257))
@@ -94,6 +96,8 @@ class ControlsView(ctx: Context) : View(ctx) {
         k("Присед", 340, 0.77f, 0.91f, 56, 56, true)
         k("Бег", 341, 0.27f, 0.70f, 56)
         // верхний ряд
+        buttons.add(Btn("⌨", K_KEYBOARD, 0, 0.12f, 0.07f, 40, 40)); k("F3", 292, 0.19f, 0.07f, 40)
+        k("GUI", 290, 0.035f, 0.09f, 40)
         k("F5", 294, 0.26f, 0.07f, 40); k("Чат", 'T'.code, 0.33f, 0.07f, 40); k("Esc", 256, 0.40f, 0.07f, 40)
         k("Инв.", 'E'.code, 0.47f, 0.07f, 40); k("Бросить", 'Q'.code, 0.54f, 0.07f, 40)
         // хотбар
@@ -105,7 +109,7 @@ class ControlsView(ctx: Context) : View(ctx) {
         try {
             val a = JSONArray()
             buttons.forEach { a.put(it.toJson()) }
-            file.writeText(JSONObject().put("v", 2).put("sens", sens.toDouble()).put("buttons", a).toString())
+            file.writeText(JSONObject().put("v", 3).put("sens", sens.toDouble()).put("buttons", a).toString())
         } catch (_: Throwable) {
         }
     }
@@ -122,7 +126,9 @@ class ControlsView(ctx: Context) : View(ctx) {
                     buttons.add(Btn(o.getString("l"), o.getInt("k"), o.getInt("c"), o.getDouble("x").toFloat(),
                         o.getDouble("y").toFloat(), o.getInt("w"), o.getInt("h"), o.optBoolean("t")))
                 }
-                if (!j.has("v")) migrate()
+                val ver = j.optInt("v", 0)
+                if (ver < 2) migrate()
+                if (ver < 3) addNew()
                 if (buttons.isNotEmpty()) return
             }
         } catch (_: Throwable) {
@@ -141,6 +147,14 @@ class ControlsView(ctx: Context) : View(ctx) {
             buttons.firstOrNull { it.kind == K_KEY && it.code == 340 }?.let { it.cx = atk.cx; it.cy = 0.91f }
         }
         buttons.firstOrNull { it.kind == K_KEY && it.code == 32 }?.let { it.w = 88; it.h = 88 }
+        save()
+    }
+
+    /** Версия 3: кнопки клавиатуры, F3 и GUI (F1). */
+    private fun addNew() {
+        if (buttons.none { it.kind == K_KEYBOARD }) buttons.add(Btn("⌨", K_KEYBOARD, 0, 0.12f, 0.07f, 40, 40))
+        if (buttons.none { it.kind == K_KEY && it.code == 292 }) buttons.add(Btn("F3", K_KEY, 292, 0.19f, 0.07f, 40, 40))
+        if (buttons.none { it.kind == K_KEY && it.code == 290 }) buttons.add(Btn("GUI", K_KEY, 290, 0.035f, 0.09f, 40, 40))
         save()
     }
 
@@ -174,7 +188,53 @@ class ControlsView(ctx: Context) : View(ctx) {
 
     private fun hit(x: Float, y: Float): Btn? = buttons.lastOrNull { rect(it).contains(x, y) }
 
+    private var kbd = false
+    private fun pk(type: Int, a: Int) { try { Native.pushEvent(type, a.toDouble(), 0.0, 0) } catch (_: Throwable) {} }
+    private fun key(code: Int) {
+        try { Native.pushEvent(1, code.toDouble(), 0.0, 1); Native.pushEvent(1, code.toDouble(), 0.0, 0) } catch (_: Throwable) {}
+    }
+
+    private fun toggleKeyboard() {
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        kbd = !kbd
+        if (kbd) {
+            isFocusableInTouchMode = true
+            requestFocus()
+            imm.restartInput(this)
+            imm.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
+        } else {
+            imm.hideSoftInputFromWindow(windowToken, 0)
+        }
+    }
+
+    override fun onCheckIsTextEditor() = true
+
+    override fun onCreateInputConnection(outAttrs: android.view.inputmethod.EditorInfo): android.view.inputmethod.InputConnection {
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        outAttrs.imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN or android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        return object : android.view.inputmethod.BaseInputConnection(this, false) {
+            override fun commitText(t: CharSequence, p: Int): Boolean {
+                t.codePoints().forEach { pk(2, it) }
+                return true
+            }
+            override fun setComposingText(t: CharSequence, p: Int): Boolean = true
+            override fun finishComposingText(): Boolean = true
+            override fun deleteSurroundingText(b: Int, a: Int): Boolean { repeat(maxOf(b, 1)) { key(259) }; return true }
+            override fun sendKeyEvent(e: android.view.KeyEvent): Boolean {
+                if (e.action == android.view.KeyEvent.ACTION_DOWN) {
+                    when (e.keyCode) {
+                        android.view.KeyEvent.KEYCODE_DEL -> key(259)
+                        android.view.KeyEvent.KEYCODE_ENTER -> key(257)
+                    }
+                }
+                return true
+            }
+            override fun performEditorAction(a: Int): Boolean { key(257); return true }
+        }
+    }
+
     private fun fire(b: Btn, down: Boolean) {
+        if (b.kind == K_KEYBOARD) { if (down && !editing) toggleKeyboard(); return }
         try {
             when (b.kind) {
                 K_KEY -> Native.pushEvent(1, b.code.toDouble(), 0.0, if (down) 1 else 0)

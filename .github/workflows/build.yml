@@ -62,7 +62,7 @@ jobs:
 
       - name: Name the APK
         run: |
-          NAME="SimpleMC-launcher-v-$(cat VERSION)"
+          NAME="Mobilix-launcher-v-$(cat VERSION)"
           mkdir -p out
           cp app/build/outputs/apk/debug/app-debug.apk "out/$NAME.apk"
           echo "NAME=$NAME" >> "$GITHUB_ENV"

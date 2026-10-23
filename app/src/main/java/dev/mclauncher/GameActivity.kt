@@ -57,6 +57,7 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
         super.onCreate(savedInstanceState)
         mode = intent.getStringExtra("mode") ?: "game"
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
@@ -152,7 +153,7 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
         }
         sb.append("\n--- экран ---\n").append(logView.text)
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("SimpleMC log", sb.toString()))
+        cm.setPrimaryClip(ClipData.newPlainText("Mobilix log", sb.toString()))
         say("Лог скопирован в буфер обмена.")
     }
 

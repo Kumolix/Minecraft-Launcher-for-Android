@@ -96,15 +96,25 @@ class MainActivity : Activity() {
     internal fun nickName() = prefs.getString("nick", NICK) ?: NICK
     internal fun dpi(v: Int) = dp(v)
 
+    /** Фон кнопки: при нажатии и в выключенном состоянии темнеет. */
+    internal fun sel(color: Int): android.graphics.drawable.Drawable {
+        fun dk(f: Float): Int = Color.rgb((Color.red(color) * f).toInt(), (Color.green(color) * f).toInt(), (Color.blue(color) * f).toInt())
+        return android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(-android.R.attr.state_enabled), android.graphics.drawable.ColorDrawable(dk(0.45f)))
+            addState(intArrayOf(android.R.attr.state_pressed), android.graphics.drawable.ColorDrawable(dk(0.55f)))
+            addState(intArrayOf(), android.graphics.drawable.ColorDrawable(color))
+        }
+    }
+
     private fun bar(text: String, color: Int, sizeSp: Float, h: Int, onClick: () -> Unit) = TextView(this).apply {
         this.text = text; textSize = sizeSp; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-        setBackgroundColor(color); isClickable = true; minHeight = dp(h)
+        background = sel(color); isClickable = true; minHeight = dp(h)
         setOnClickListener { onClick() }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        drawerW = (resources.displayMetrics.widthPixels * 0.93f).toInt()
+        drawerW = resources.displayMetrics.widthPixels - dp(64)
 
         rootFrame = FrameLayout(this).apply { setBackgroundColor(0xFF0B0F0C.toInt()); fitsSystemWindows = true }
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -113,13 +123,9 @@ class MainActivity : Activity() {
         // верхняя полоса: название по центру, лог справа (кнопка-меню рисуется поверх всего)
         val top = FrameLayout(this).apply { setBackgroundColor(0xFF121A15.toInt()) }
         val titleBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
-        titleBox.addView(TextView(this).apply { text = "SimpleMC"; textSize = 20f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER })
+        titleBox.addView(TextView(this).apply { text = "Mobilix"; textSize = 20f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER })
         titleBox.addView(TextView(this).apply { text = versionLabel(); textSize = 11f; setTextColor(0xFF7FA08A.toInt()); gravity = Gravity.CENTER })
         top.addView(titleBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56), Gravity.CENTER))
-        top.addView(TextView(this).apply {
-            text = tr("Лог", "Log"); textSize = 14f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER
-            setOnClickListener { logPanel.visibility = if (logPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
-        }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.END or Gravity.CENTER_VERTICAL))
         root.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
 
         // область 3D-скина
@@ -162,7 +168,7 @@ class MainActivity : Activity() {
 
         playBtn = Button(this).apply {
             text = tr("Играть", "Play"); textSize = 22f; setTextColor(Color.WHITE)
-            setBackgroundColor(0xFF2EA84F.toInt()); isAllCaps = false
+            background = sel(0xFF2EA84F.toInt()); isAllCaps = false
             setOnClickListener { start() }
         }
         root.addView(playBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(76)))
@@ -181,7 +187,7 @@ class MainActivity : Activity() {
         fun item(ru: String, en: String, onClick: () -> Unit): TextView {
             val t = TextView(this).apply {
                 text = tr(ru, en); textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(28), 0, dp(16), 0); isClickable = true
+                setPadding(dp(28), 0, dp(16), 0); isClickable = true; background = sel(0xFF0F1712.toInt())
                 setOnClickListener { onClick() }
             }
             drawer.addView(View(this).apply { setBackgroundColor(0xFF22332A.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
@@ -192,6 +198,7 @@ class MainActivity : Activity() {
         item("Настройки", "Settings") { openPage(tr("Настройки", "Settings"), stubPage(tr("Настройки появятся позже", "Settings are coming soon"))) }
         item("Загрузчик версий", "Version loader") { openPage(tr("Загрузчик версий", "Version loader"), versionsPage()) }
         item("Каталог", "Catalog") { openPage(tr("Каталог", "Catalog"), stubPage(tr("Каталог модов и ресурспаков (Modrinth) появится позже", "Mods & resource packs catalog (Modrinth) is coming soon"))) }
+        item("Раскладка управления", "Controls layout") { startActivity(Intent(this, ControlsEditorActivity::class.java)) }
         menuWipe = item("Удалить скачанное", "Delete downloads") { confirmWipe() }
         item("Язык", "Language") { chooseLanguage() }
         drawer.addView(View(this).apply { setBackgroundColor(0xFF22332A.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
@@ -199,6 +206,13 @@ class MainActivity : Activity() {
 
         hamb = HamburgerView(this).apply { setOnClickListener { setDrawer(!drawerOpen) } }
         rootFrame.addView(hamb, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.START or Gravity.TOP))
+
+        val logBtn = TextView(this).apply {
+            text = tr("Лог", "Log"); textSize = 12f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF0F1712.toInt()); setStroke(dp(2), 0xFF2EA84F.toInt()); cornerRadius = dp(8).toFloat() }
+            setOnClickListener { logPanel.visibility = if (logPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
+        }
+        rootFrame.addView(logBtn, FrameLayout.LayoutParams(dp(40), dp(40), Gravity.END or Gravity.TOP).apply { topMargin = dp(8); marginEnd = dp(10) })
 
         pageLayer = FrameLayout(this).apply { visibility = View.GONE }
         rootFrame.addView(pageLayer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -287,9 +301,19 @@ class MainActivity : Activity() {
         skinFile()?.let { skin.setSkin(android.graphics.BitmapFactory.decodeFile(it.path)) }
         col.addView(skin, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(260)))
         fun btn(t: String, bg: Int, fg: Int = Color.WHITE, onClick: () -> Unit) = Button(this).apply {
-            text = t; isAllCaps = false; setTextColor(fg); setBackgroundColor(bg); setOnClickListener { onClick() }
+            text = t; isAllCaps = false; setTextColor(fg); background = sel(bg); setOnClickListener { onClick() }
         }
-        col.addView(btn(tr("Сменить скин (PNG)", "Change skin (PNG)"), 0xFF14301D.toInt()) {
+        val sw = android.widget.Switch(this).apply {
+            text = tr("Стройный скин (руки 3 px)", "Slim skin (3 px arms)")
+            setTextColor(Color.WHITE); isChecked = prefs.getBoolean("slim", false)
+            setOnCheckedChangeListener { _, on ->
+                prefs.edit().putBoolean("slim", on).apply()
+                skin.slim = on; skinView.slim = on
+            }
+        }
+        skin.slim = prefs.getBoolean("slim", false)
+        col.addView(sw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
+        col.addView(btn(tr("Загрузить скин (PNG)", "Upload skin (PNG)"), 0xFF14301D.toInt()) {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/png"), 77)
         })
         col.addView(btn(tr("Сбросить на стандартный", "Reset to default"), 0xFF0F2416.toInt()) {
@@ -326,8 +350,8 @@ class MainActivity : Activity() {
         ms.addView(TextView(this).apply { text = tr("Войти через Microsoft", "Sign in with Microsoft"); textSize = 15f; setTextColor(0xFF5E5E5E.toInt()); setPadding(dp(12), 0, 0, 0) })
         col.addView(ms, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)).apply { topMargin = dp(28) })
         col.addView(TextView(this).apply {
-            text = tr("Скин виден в лаунчере. В игре в офлайн-режиме отображается стандартный скин: свой скин в игре будет доступен после входа через Microsoft.",
-                "The skin is shown in the launcher. In offline mode the game uses a default skin; your own skin in-game needs Microsoft sign-in.")
+            text = tr("Скин применяется и в игре: лаунчер подставляет его как стандартный скин (ресурспак Mobilix-skin). Ширина рук в игре зависит от UUID игрока.",
+                "The skin is also applied in-game as the default skin (Mobilix-skin resource pack). Arm width in-game depends on the player UUID.")
             textSize = 12f; setTextColor(0xFF7FA08A.toInt()); setPadding(0, dp(16), 0, 0)
         })
         sv.addView(col)
@@ -405,7 +429,7 @@ class MainActivity : Activity() {
                     r.addView(Button(this).apply {
                         text = if (inst) tr("Установлена", "Installed") else tr("Скачать", "Download")
                         isAllCaps = false; textSize = 12f; setTextColor(Color.WHITE)
-                        setBackgroundColor(if (inst) 0xFF14301D.toInt() else 0xFF2EA84F.toInt())
+                        background = sel(if (inst) 0xFF14301D.toInt() else 0xFF2EA84F.toInt())
                         setOnClickListener {
                             Toast.makeText(this@MainActivity,
                                 if (inst) tr("Эта версия уже установлена", "Already installed")
@@ -508,7 +532,7 @@ class MainActivity : Activity() {
             }
             val custom = File(filesDir, "skin_custom.png")
             val bmp = android.graphics.BitmapFactory.decodeFile((if (custom.exists()) custom else cache).path)
-            runOnUiThread { skinView.setSkin(bmp) }
+            runOnUiThread { skinView.slim = prefs.getBoolean("slim", false); skinView.setSkin(bmp) }
         } catch (_: Throwable) {
         }
     }
@@ -538,6 +562,7 @@ class MainActivity : Activity() {
         } catch (_: Throwable) {
         }
         playBtn.isEnabled = !b
+        playBtn.alpha = if (b) 0.6f else 1f
         if (::menuWipe.isInitialized) menuWipe.isEnabled = !b
     }
 
@@ -561,6 +586,59 @@ class MainActivity : Activity() {
 
     /** Java-рантайм обязан лежать во внутренней памяти: из внешней Android не даст запустить файлы. */
     private fun runtimeDir(): File = File(filesDir, "runtime")
+
+    /** UUID: при своём скине подбираем такой, у которого стандартный скин нужной ширины. */
+    private fun skinUuid(): String {
+        val n = nickName()
+        if (!File(filesDir, "skin_custom.png").exists()) return offlineUuid(n)
+        val slim = prefs.getBoolean("slim", false)
+        for (k in 0 until 500) {
+            val u = UUID.nameUUIDFromBytes("OfflinePlayer:$n#$k".toByteArray())
+            val idx = Math.floorMod(u.hashCode(), 18)
+            if ((idx < 9) == slim) return u.toString()
+        }
+        return offlineUuid(n)
+    }
+
+    /** Кладёт ресурспак, подменяющий все стандартные скины, и включает его в options.txt. */
+    private fun applySkinPack(gameDir: File) {
+        val packName = "Mobilix-skin.zip"
+        val packFile = File(gameDir, "resourcepacks/$packName")
+        val custom = File(filesDir, "skin_custom.png")
+        val opt = File(gameDir, "options.txt")
+        try {
+            val lines = if (opt.exists()) opt.readLines().toMutableList() else ArrayList()
+            val i = lines.indexOfFirst { it.startsWith("resourcePacks:") }
+            val arr = try { JSONArray(if (i >= 0) lines[i].substringAfter(":") else "[]") } catch (_: Exception) { JSONArray() }
+            val list = ArrayList<String>()
+            for (k in 0 until arr.length()) list.add(arr.getString(k))
+            val entry = "file/$packName"
+            if (custom.exists()) {
+                packFile.parentFile?.mkdirs()
+                val png = custom.readBytes()
+                java.util.zip.ZipOutputStream(packFile.outputStream()).use { z ->
+                    z.putNextEntry(java.util.zip.ZipEntry("pack.mcmeta"))
+                    z.write("{\"pack\":{\"pack_format\":42,\"description\":\"Mobilix skin\"}}".toByteArray())
+                    z.closeEntry()
+                    for (n in listOf("alex", "ari", "efe", "kai", "makena", "noor", "steve", "sunny", "zuri"))
+                        for (d in listOf("wide", "slim")) {
+                            z.putNextEntry(java.util.zip.ZipEntry("assets/minecraft/textures/entity/player/$d/$n.png"))
+                            z.write(png); z.closeEntry()
+                        }
+                }
+                if (!list.contains("vanilla")) list.add(0, "vanilla")
+                if (!list.contains(entry)) list.add(entry)
+            } else {
+                list.remove(entry)
+                packFile.delete()
+            }
+            val newLine = "resourcePacks:" + JSONArray(list).toString()
+            if (i >= 0) lines[i] = newLine else lines.add(newLine)
+            opt.writeText(lines.joinToString("\n") + "\n")
+        } catch (e: Throwable) {
+            log("Скин в игре: $e")
+        }
+    }
 
     private fun confirmWipe() {
         AlertDialog.Builder(this)
@@ -681,20 +759,21 @@ class MainActivity : Activity() {
         val mgPath = ensureMobileGlues()
 
         // 6. Команда запуска
+        applySkinPack(gameDir)
         val repl = mapOf(
             "auth_player_name" to nickName(),
             "version_name" to VERSION,
             "game_directory" to gameDir.path,
             "assets_root" to assetsDir.path,
             "assets_index_name" to indexId,
-            "auth_uuid" to offlineUuid(nickName()),
+            "auth_uuid" to skinUuid(),
             "auth_access_token" to "0",
             "clientid" to "0",
             "auth_xuid" to "0",
             "user_type" to "legacy",
             "version_type" to "release",
             "natives_directory" to natives.path,
-            "launcher_name" to "SimpleMC",
+            "launcher_name" to "Mobilix",
             "launcher_version" to "0.2",
             "classpath" to classpath.joinToString(":")
         )
@@ -1006,7 +1085,7 @@ class MainActivity : Activity() {
         val c = URL(url).openConnection() as HttpURLConnection
         c.connectTimeout = 20000
         c.readTimeout = 60000
-        c.setRequestProperty("User-Agent", "SimpleMC/0.3")
+        c.setRequestProperty("User-Agent", "Mobilix/1.4")
         val code = c.responseCode
         if (code != 200) throw RuntimeException("HTTP $code")
         val total = c.contentLengthLong
@@ -1155,7 +1234,7 @@ class MainActivity : Activity() {
                 val c = URL(u).openConnection() as HttpURLConnection
                 c.connectTimeout = 15000
                 c.readTimeout = 30000
-                c.setRequestProperty("User-Agent", "SimpleMC/0.3")
+                c.setRequestProperty("User-Agent", "Mobilix/1.4")
                 return c.inputStream.bufferedReader().use { it.readText() }
             } catch (e: Exception) {
                 err = e
@@ -1210,7 +1289,7 @@ class MainActivity : Activity() {
                 val c = URL(u).openConnection() as HttpURLConnection
                 c.connectTimeout = 20000
                 c.readTimeout = 40000
-                c.setRequestProperty("User-Agent", "SimpleMC/0.3")
+                c.setRequestProperty("User-Agent", "Mobilix/1.4")
                 val code = c.responseCode
                 if (code != 200) {
                     lastDownloadError = "HTTP $code ($u)"
