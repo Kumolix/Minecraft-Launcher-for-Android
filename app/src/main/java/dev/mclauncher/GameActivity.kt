@@ -182,6 +182,13 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
             if (!opts.contains("-Xrs")) opts.add("-Xrs")
             val game = j.getJSONArray("game")
             val args = Array(game.length()) { game.getString(it) }
+            for (k in 0 until game.length() - 1) {
+                if (game.getString(k) == "--gameDir") {
+                    val gd = File(game.getString(k + 1)).apply { mkdirs() }
+                    opts.add("-Duser.dir=" + gd.path)
+                    File(gd, "logs").mkdirs()
+                }
+            }
 
             val log = File(dataDir, "game.log")
             gameLog = log

@@ -262,3 +262,23 @@ EXPORT int glfwUpdateGamepadMappings(const char* s) { return 1; }
 EXPORT void* glfwSetJoystickCallback(void* f) { return NULL; }
 EXPORT int glfwVulkanSupported(void) { return 0; }
 EXPORT const char** glfwGetRequiredInstanceExtensions(uint32_t* c) { if (c) *c = 0; return NULL; }
+
+// ---------- дополнительные заглушки (нужны LWJGL 3.3.3 при загрузке) ----------
+EXPORT void glfwInitAllocator(const void* a) { (void)a; }
+EXPORT const void* glfwGetGammaRamp(void* m) { (void)m; return NULL; }
+EXPORT void glfwSetGamma(void* m, float g) { (void)m; (void)g; }
+EXPORT void glfwSetGammaRamp(void* m, const void* r) { (void)m; (void)r; }
+EXPORT void* glfwGetInstanceProcAddress(void* i, const char* n) { (void)i; (void)n; return NULL; }
+EXPORT void* glfwGetJoystickUserPointer(int j) { (void)j; return NULL; }
+EXPORT void glfwSetJoystickUserPointer(int j, void* p) { (void)j; (void)p; }
+static void* g_monptr;
+EXPORT void* glfwGetMonitorUserPointer(void* m) { (void)m; return g_monptr; }
+EXPORT void glfwSetMonitorUserPointer(void* m, void* p) { (void)m; g_monptr = p; }
+EXPORT void glfwGetMonitorWorkarea(void* m, int* x, int* y, int* w, int* h) {
+    (void)m; if (x) *x = 0; if (y) *y = 0; if (w) *w = G.w; if (h) *h = G.h;
+}
+EXPORT int glfwGetPhysicalDevicePresentationSupport(void* i, void* d, unsigned q) { (void)i; (void)d; (void)q; return 0; }
+EXPORT int glfwCreateWindowSurface(void* i, void* w, const void* a, void* s) { (void)i; (void)w; (void)a; (void)s; return -7; }
+EXPORT float glfwGetWindowOpacity(void* w) { (void)w; return 1.0f; }
+EXPORT void glfwSetWindowOpacity(void* w, float o) { (void)w; (void)o; }
+EXPORT const char* glfwGetWindowTitle(void* w) { (void)w; return "Minecraft"; }
