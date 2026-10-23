@@ -93,6 +93,23 @@ static jint create_jvm(JNIEnv* env, jstring javaHome, jobjectArray opts, JavaVM*
     if (!h) { snprintf(err, cap, "JVM: dlopen(%s) не удался: %s", path, dlerror()); return -1; }
     CreateJvmFn create = (CreateJvmFn) dlsym(h, "JNI_CreateJavaVM");
     if (!create) { snprintf(err, cap, "JVM: нет символа JNI_CreateJavaVM"); return -1; }
+    // Пространство имён приложения не видит папку lib рантайма: расширяем поиск и подгружаем заранее.
+    {
+        typedef void (*UpdFn)(const char*);
+        UpdFn upd = (UpdFn) dlsym(RTLD_DEFAULT, "android_update_LD_LIBRARY_PATH");
+        char lp[3200];
+        snprintf(lp, sizeof lp, "%s/lib:%s/lib/server:%s/lib/jli", home, home, home);
+        if (upd) { upd(lp); LOG("android_update_LD_LIBRARY_PATH: %s", lp); }
+        else LOG("android_update_LD_LIBRARY_PATH недоступна");
+        const char* pre[] = { "libjava.so", "libverify.so", "libzip.so", "libjimage.so",
+                              "libnet.so", "libnio.so", "libextnet.so", NULL };
+        for (int i = 0; pre[i]; i++) {
+            char pp[1100];
+            snprintf(pp, sizeof pp, "%s/lib/%s", home, pre[i]);
+            void* ph = dlopen(pp, RTLD_NOW | RTLD_GLOBAL);
+            LOG("preload %s -> %s", pre[i], ph ? "ok" : dlerror());
+        }
+    }
     int n = (*env)->GetArrayLength(env, opts);
     JavaVMOption* o = (JavaVMOption*) calloc(n, sizeof(JavaVMOption));
     for (int i = 0; i < n; i++) {
