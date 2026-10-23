@@ -31,7 +31,7 @@ typedef void (*closefun)(void*);
 typedef void (*scalefun)(void*, float, float);
 
 static struct {
-    ANativeWindow* win; int w, h, size_dirty;
+    ANativeWindow* volatile win; int w, h, size_dirty; volatile int surf_dirty;
     EGLDisplay dpy; EGLSurface surf; EGLContext ctx; EGLConfig cfg;
     void* gl_lib;
     errfun err; keyfun key; charfun chr; charmodsfun chrmods; mbfun mbtn; cposfun cpos;
@@ -56,7 +56,10 @@ EXPORT void smc_push_event(int type, double a, double b, int c) {
     pthread_mutex_unlock(&qm);
 }
 
+EXPORT void smc_surface_lost(void) { G.win = NULL; }
+
 EXPORT void smc_set_surface(ANativeWindow* w, int width, int height) {
+    if (G.created && w && w != G.win) G.surf_dirty = 1;
     G.win = w;
     if (G.w != width || G.h != height) G.size_dirty = 1;
     G.w = width; G.h = height;
@@ -126,7 +129,20 @@ EXPORT void glfwMakeContextCurrent(void* w) {
 }
 EXPORT void* glfwGetCurrentContext(void) { return eglGetCurrentContext() != EGL_NO_CONTEXT ? (void*) &G : NULL; }
 EXPORT void glfwSwapInterval(int i) { if (G.dpy) eglSwapInterval(G.dpy, i); }
-EXPORT void glfwSwapBuffers(void* w) { if (G.created) eglSwapBuffers(G.dpy, G.surf); }
+EXPORT void glfwSwapBuffers(void* w) {
+    if (!G.created) return;
+    if (!G.win) { usleep(30000); return; }            // поверхность потеряна (приложение свёрнуто)
+    if (G.surf_dirty) {                                // вернулись: новая поверхность
+        G.surf_dirty = 0;
+        eglMakeCurrent(G.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, G.ctx);
+        if (G.surf != EGL_NO_SURFACE) eglDestroySurface(G.dpy, G.surf);
+        G.surf = eglCreateWindowSurface(G.dpy, G.cfg, G.win, NULL);
+        eglMakeCurrent(G.dpy, G.surf, G.surf, G.ctx);
+        G.size_dirty = 1;
+        LOG("поверхность пересоздана %dx%d", G.w, G.h);
+    }
+    if (eglSwapBuffers(G.dpy, G.surf) == EGL_FALSE) G.surf_dirty = G.win ? 1 : 0;
+}
 
 EXPORT void* glfwGetProcAddress(const char* name) {
     void* p = G.gl_lib ? dlsym(G.gl_lib, name) : NULL;

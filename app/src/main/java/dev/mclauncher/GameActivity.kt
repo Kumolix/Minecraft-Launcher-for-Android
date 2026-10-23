@@ -36,6 +36,7 @@ object Native {
     @JvmStatic external fun setGlLib(path: String)
     @JvmStatic external fun redirectOutput(path: String)
     @JvmStatic external fun chdir(path: String)
+    @JvmStatic external fun surfaceLost()
     @JvmStatic external fun runMain(javaHome: String, options: Array<String>, mainClass: String, args: Array<String>): String
 }
 
@@ -74,13 +75,28 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
             logView,
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
         )
+        logView.visibility = View.GONE
         val copy = Button(this).apply {
             text = "Копировать лог"
             textSize = 11f
             setOnClickListener { copyLog() }
         }
+        val toggle = Button(this).apply {
+            text = "Показать лог"
+            textSize = 11f
+            setOnClickListener {
+                val show = logView.visibility != View.VISIBLE
+                logView.visibility = if (show) View.VISIBLE else View.GONE
+                text = if (show) "Скрыть лог" else "Показать лог"
+            }
+        }
+        val bar = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            addView(toggle)
+            addView(copy)
+        }
         root.addView(
-            copy,
+            bar,
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)
         )
         setContentView(root)
@@ -106,7 +122,14 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
 
     // ---------- поверхность ----------
     override fun surfaceCreated(holder: SurfaceHolder) {}
-    override fun surfaceDestroyed(holder: SurfaceHolder) {}
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+        if (mode == "game" && started) {
+            try {
+                Native.surfaceLost()
+            } catch (_: Throwable) {
+            }
+        }
+    }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         if (mode == "game") {

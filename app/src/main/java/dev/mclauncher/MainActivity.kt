@@ -102,12 +102,6 @@ class MainActivity : Activity() {
             setOnClickListener { confirmWipe() }
         }
         root.addView(wipeBtn)
-        root.addView(Button(this).apply {
-            text = "Тест окна и JVM (этап 3)"
-            setOnClickListener {
-                startActivity(Intent(this@MainActivity, GameActivity::class.java).putExtra("mode", "test"))
-            }
-        })
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
         }
@@ -146,6 +140,10 @@ class MainActivity : Activity() {
     }
 
     private fun setBusy(b: Boolean) = runOnUiThread {
+        try {
+            if (b) DownloadService.start(this) else DownloadService.stop(this)
+        } catch (_: Throwable) {
+        }
         playBtn.isEnabled = !b
         wipeBtn.isEnabled = !b
     }

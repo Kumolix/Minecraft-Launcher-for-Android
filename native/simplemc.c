@@ -217,3 +217,6 @@ JNIEXPORT void JNICALL Java_dev_mclauncher_Native_redirectOutput(JNIEnv* env, jc
     pthread_t t;
     pthread_create(&t, NULL, pump, NULL);
 }
+
+extern void smc_surface_lost(void);
+JNIEXPORT void JNICALL Java_dev_mclauncher_Native_surfaceLost(JNIEnv* env, jclass cls) { smc_surface_lost(); }
