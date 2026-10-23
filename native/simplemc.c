@@ -200,6 +200,11 @@ static void* pump(void* arg) {
     }
     return NULL;
 }
+JNIEXPORT void JNICALL Java_dev_mclauncher_Native_chdir(JNIEnv* env, jclass cls, jstring path) {
+    const char* p = (*env)->GetStringUTFChars(env, path, NULL);
+    chdir(p);
+    (*env)->ReleaseStringUTFChars(env, path, p);
+}
 JNIEXPORT void JNICALL Java_dev_mclauncher_Native_redirectOutput(JNIEnv* env, jclass cls, jstring path) {
     const char* p = (*env)->GetStringUTFChars(env, path, NULL);
     g_logf = fopen(p, "w");

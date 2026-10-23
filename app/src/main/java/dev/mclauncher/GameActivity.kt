@@ -35,6 +35,7 @@ object Native {
     @JvmStatic external fun pushEvent(type: Int, a: Double, b: Double, c: Int)
     @JvmStatic external fun setGlLib(path: String)
     @JvmStatic external fun redirectOutput(path: String)
+    @JvmStatic external fun chdir(path: String)
     @JvmStatic external fun runMain(javaHome: String, options: Array<String>, mainClass: String, args: Array<String>): String
 }
 
@@ -187,6 +188,7 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
                     val gd = File(game.getString(k + 1)).apply { mkdirs() }
                     opts.add("-Duser.dir=" + gd.path)
                     File(gd, "logs").mkdirs()
+                    Native.chdir(gd.path)
                 }
             }
 
