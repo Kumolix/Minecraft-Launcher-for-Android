@@ -13,6 +13,10 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
+import android.widget.FrameLayout
+import android.view.Gravity
+import android.graphics.Color
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import org.json.JSONArray
@@ -72,52 +76,128 @@ class MainActivity : Activity() {
     private lateinit var wipeBtn: Button
     private var logFile: File? = null
 
+    private lateinit var skinView: SkinView
+    private lateinit var logPanel: LinearLayout
+    private lateinit var versionText: TextView
+
+    private fun bar(text: String, color: Int, sizeSp: Float, h: Int, onClick: () -> Unit) = TextView(this).apply {
+        this.text = text; textSize = sizeSp; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+        setBackgroundColor(color); isClickable = true; minHeight = dp(h)
+        setOnClickListener { onClick() }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(32), dp(16), dp(16))
+            setBackgroundColor(0xFF0B0F0C.toInt())
+            fitsSystemWindows = true
         }
-        root.addView(TextView(this).apply {
-            text = "SimpleMC Launcher " + versionLabel()
-            textSize = 24f
-        })
-        root.addView(TextView(this).apply {
-            text = "Ник: $NICK (офлайн)"
-            textSize = 16f
-            setPadding(0, dp(12), 0, dp(8))
-        })
-        root.addView(Button(this).apply {
-            text = "Версия: $VERSION"
-            isEnabled = false
-        })
-        playBtn = Button(this).apply {
-            text = "Играть"
-            setOnClickListener { start() }
-        }
-        root.addView(playBtn)
+        // верхняя белая полоса: меню слева, название по центру, лог справа
+        val top = FrameLayout(this).apply { setBackgroundColor(0xFF121A15.toInt()) }
+        top.addView(TextView(this).apply {
+            text = "☰"; textSize = 28f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER
+            setOnClickListener { Toast.makeText(this@MainActivity, "Меню появится в версии 1.4.1", Toast.LENGTH_SHORT).show() }
+        }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.START or Gravity.CENTER_VERTICAL))
+        val titleBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+        titleBox.addView(TextView(this).apply { text = "SimpleMC"; textSize = 20f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER })
+        titleBox.addView(TextView(this).apply { text = versionLabel(); textSize = 11f; setTextColor(0xFF7FA08A.toInt()); gravity = Gravity.CENTER })
+        top.addView(titleBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56), Gravity.CENTER))
+        top.addView(TextView(this).apply {
+            text = "Лог"; textSize = 14f; setTextColor(0xFF43E06A.toInt()); gravity = Gravity.CENTER
+            setOnClickListener { logPanel.visibility = if (logPanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
+        }, FrameLayout.LayoutParams(dp(56), dp(56), Gravity.END or Gravity.CENTER_VERTICAL))
+        root.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
+
+        // область 3D-скина
+        val skinBox = FrameLayout(this).apply { setBackgroundColor(0xFF0E1F14.toInt()) }
+        skinView = SkinView(this)
+        skinBox.addView(skinView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        skinBox.addView(TextView(this).apply {
+            text = NICK; textSize = 16f; setTextColor(0xFFB8E6C4.toInt()); gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(8))
+        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        root.addView(skinBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        // панель лога (скрыта по умолчанию)
+        logPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setBackgroundColor(0xFF121A15.toInt()) }
         wipeBtn = Button(this).apply {
             text = "Удалить всё скачанное"
             setOnClickListener { confirmWipe() }
         }
-        root.addView(wipeBtn)
-        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-        }
-        root.addView(
-            progress,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        )
+        logPanel.addView(wipeBtn)
         scroll = ScrollView(this)
         logView = TextView(this).apply {
             typeface = Typeface.MONOSPACE
             textSize = 11f
+            setTextColor(0xFFB8E6C4.toInt())
             setTextIsSelectable(true)
+            setPadding(dp(8), 0, dp(8), 0)
         }
         scroll.addView(logView)
-        root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        logPanel.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(170)))
+        root.addView(logPanel, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
+        root.addView(progress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(6)))
+
+        // синяя полоса: выбранная версия + выпадающий вверх список
+        val vrow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        versionText = bar("Версия: $VERSION", 0xFF14301D.toInt(), 17f, 56) {}
+        vrow.addView(versionText, LinearLayout.LayoutParams(0, dp(56), 1f))
+        val arrow = bar("▲", 0xFF0F2416.toInt(), 18f, 56) {}
+        arrow.setOnClickListener { showVersions(arrow) }
+        versionText.setOnClickListener { showVersions(arrow) }
+        vrow.addView(arrow, LinearLayout.LayoutParams(dp(64), dp(56)))
+        root.addView(vrow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
+
+        // зелёная кнопка «Играть»
+        playBtn = Button(this).apply {
+            text = "Играть"; textSize = 22f; setTextColor(Color.WHITE)
+            setBackgroundColor(0xFF2EA84F.toInt()); isAllCaps = false
+            setOnClickListener { start() }
+        }
+        root.addView(playBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(76)))
         setContentView(root)
+        Thread { loadSkin() }.start()
+    }
+
+    private fun showVersions(anchor: View) {
+        val root = getExternalFilesDir(null) ?: filesDir
+        val installed = ArrayList<String>()
+        File(root, "versions").listFiles()?.forEach { if (File(it, it.name + ".jar").exists()) installed.add(it.name) }
+        if (!installed.contains(VERSION)) installed.add(0, VERSION)
+        val pm = android.widget.PopupMenu(this, anchor, Gravity.END)
+        installed.forEachIndexed { i, v -> pm.menu.add(0, i, i, v + if (v == VERSION) "  ✓" else "") }
+        pm.menu.add(1, 100, 100, "＋ Загрузить другую версию…")
+        pm.setOnMenuItemClickListener {
+            if (it.itemId == 100) Toast.makeText(this, "Скоро: выбор и загрузка других версий", Toast.LENGTH_SHORT).show()
+            true
+        }
+        pm.show()
+    }
+
+    /** Достаёт стандартный скин (Стив) из клиентского jar и показывает его в 3D. */
+    private fun loadSkin() {
+        try {
+            val root = getExternalFilesDir(null) ?: filesDir
+            val cache = File(filesDir, "skin_default.png")
+            if (!cache.exists()) {
+                val jar = File(root, "versions/$VERSION/$VERSION.jar")
+                if (!jar.exists()) return
+                java.util.zip.ZipFile(jar).use { z ->
+                    val e = listOf(
+                        "assets/minecraft/textures/entity/player/wide/steve.png",
+                        "assets/minecraft/textures/entity/steve.png"
+                    ).firstNotNullOfOrNull { z.getEntry(it) } ?: return
+                    z.getInputStream(e).use { i -> cache.outputStream().use { o -> i.copyTo(o) } }
+                }
+            }
+            val bmp = android.graphics.BitmapFactory.decodeFile(cache.path)
+            runOnUiThread { skinView.setSkin(bmp) }
+        } catch (_: Throwable) {
+        }
     }
 
     private fun versionLabel(): String = try {
@@ -247,6 +327,7 @@ class MainActivity : Activity() {
             "Клиент игры",
             listOf(Task(clientInfo.getString("url"), clientJar, clientInfo.getString("sha1")))
         )
+        Thread { loadSkin() }.start()
 
         // 3. Библиотеки
         var lwjglVer = ""

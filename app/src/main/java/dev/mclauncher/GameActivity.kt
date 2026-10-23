@@ -57,14 +57,6 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
         super.onCreate(savedInstanceState)
         mode = intent.getStringExtra("mode") ?: "game"
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        if (android.os.Build.VERSION.SDK_INT >= 28) {
-            // рисовать и под вырезом фронтальной камеры
-            window.attributes = window.attributes.apply {
-                layoutInDisplayCutoutMode = if (android.os.Build.VERSION.SDK_INT >= 30)
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            }
-        }
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
@@ -90,6 +82,7 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
         val copy = Button(this).apply {
             text = "Копировать лог"
             textSize = 11f
+            visibility = View.GONE
             setOnClickListener { copyLog() }
         }
         val toggle = Button(this).apply {
@@ -99,6 +92,7 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
                 val show = logView.visibility != View.VISIBLE
                 logView.visibility = if (show) View.VISIBLE else View.GONE
                 text = if (show) "Скрыть лог" else "Показать лог"
+                copy.visibility = if (show) View.VISIBLE else View.GONE
             }
         }
         val editBtns = ArrayList<Button>()
@@ -117,18 +111,31 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
                 editBtns.forEach { it.visibility = if (on) View.VISIBLE else View.GONE }
             }
         }
-        val bar = android.widget.LinearLayout(this).apply {
+        val row = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
-            addView(eb("+ Кнопка") { controls.newButton() })
-            addView(eb("Камера") { controls.cameraDialog() })
-            addView(eb("Сброс") { controls.reset() })
             addView(layoutBtn)
             addView(toggle)
+        }
+        val bar = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            gravity = Gravity.END
+            addView(row)
             addView(copy)
         }
         root.addView(
             bar,
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)
+        )
+        val editBar = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            addView(eb("+ Кнопка") { controls.newButton() })
+            addView(eb("Камера") { controls.cameraDialog() })
+            addView(eb("Сброс") { controls.reset() })
+        }
+        root.addView(
+            editBar,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+                .apply { bottomMargin = (56 * resources.displayMetrics.density).toInt() }
         )
         setContentView(root)
     }
