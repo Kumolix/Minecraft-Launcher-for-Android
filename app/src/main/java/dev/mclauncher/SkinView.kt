@@ -15,6 +15,8 @@ import android.view.View
 class SkinView(ctx: Context) : View(ctx) {
     private var skin: Bitmap? = null
     private var yaw = 25f
+    private var pitch = 8f
+    private var lastY = 0f
     private var lastX = 0f
     private var touching = false
     private var last = System.nanoTime()
@@ -52,7 +54,7 @@ class SkinView(ctx: Context) : View(ctx) {
     private fun faces(w: Int, h: Int): List<Face> {
         val out = ArrayList<Face>()
         val a = Math.toRadians(yaw.toDouble()); val ca = Math.cos(a).toFloat(); val sa = Math.sin(a).toFloat()
-        val p = Math.toRadians(-8.0); val cp = Math.cos(p).toFloat(); val sp = Math.sin(p).toFloat()
+        val p = Math.toRadians(-pitch.toDouble()); val cp = Math.cos(p).toFloat(); val sp = Math.sin(p).toFloat()
         val dist = 70f
         val f = h * 0.88f * dist / 36f
         for (pt in parts) {
@@ -120,8 +122,9 @@ class SkinView(ctx: Context) : View(ctx) {
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { touching = true; lastX = e.x; parent?.requestDisallowInterceptTouchEvent(true) }
-            MotionEvent.ACTION_MOVE -> { yaw += (e.x - lastX) * 0.6f; lastX = e.x; invalidate() }
+            MotionEvent.ACTION_DOWN -> { touching = true; lastX = e.x; lastY = e.y; parent?.requestDisallowInterceptTouchEvent(true) }
+            MotionEvent.ACTION_MOVE -> { yaw += (e.x - lastX) * 0.6f; lastX = e.x
+                pitch = (pitch + (e.y - lastY) * 0.5f).coerceIn(-70f, 70f); lastY = e.y; invalidate() }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { touching = false; last = System.nanoTime() }
         }
         return true
