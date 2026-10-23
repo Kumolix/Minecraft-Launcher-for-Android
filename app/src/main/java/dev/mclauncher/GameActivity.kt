@@ -255,6 +255,12 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
                     i += 2
                     continue
                 }
+                val eq = setOf("--add-modules", "--add-opens", "--add-exports", "--add-reads", "--limit-modules", "--patch-module", "--upgrade-module-path", "--module-path")
+                if ((a == "-p" || a in eq) && i + 1 < jvm.length()) {
+                    opts.add((if (a == "-p") "--module-path" else a) + "=" + jvm.getString(i + 1))
+                    i += 2
+                    continue
+                }
                 opts.add(a)
                 i++
             }

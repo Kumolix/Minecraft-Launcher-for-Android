@@ -15,6 +15,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.SeekBar
+import android.widget.ImageView
 import android.widget.FrameLayout
 import android.view.Gravity
 import android.graphics.Color
@@ -160,7 +161,7 @@ class MainActivity : Activity() {
 
         // полоса версии + выпадающий вверх список
         val vrow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        versionText = bar(tr("Версия: ", "Version: ") + VERSION, 0xFF14301D.toInt(), 17f, 56) {}
+        versionText = bar(tr("Версия: ", "Version: ") + prettyProfile(selectedProfile()), 0xFF14301D.toInt(), 17f, 56) {}
         vrow.addView(versionText, LinearLayout.LayoutParams(0, dp(56), 1f))
         val arrow = bar("▲", 0xFF0F2416.toInt(), 18f, 56) {}
         arrow.setOnClickListener { showVersions(arrow) }
@@ -390,7 +391,7 @@ class MainActivity : Activity() {
 
     private fun catalogPage(): View {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        var type = "mod"; var loader = "fabric"
+        var type = "mod"; var loader = if (selectedProfile().contains("forge")) "forge" else "fabric"
         val q = android.widget.EditText(this).apply {
             hint = tr("Поиск", "Search"); setHintTextColor(Th.hint); setTextColor(Th.text); setSingleLine(true)
             setPadding(dp(20), dp(12), dp(20), dp(12)); imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
@@ -403,7 +404,7 @@ class MainActivity : Activity() {
             val query = q.text.toString().trim()
             Thread {
                 try {
-                    val facets = JSONArray().put(JSONArray().put("versions:$VERSION")).put(JSONArray().put("project_type:$type"))
+                    val facets = JSONArray().put(JSONArray().put("versions:${curBase()}")).put(JSONArray().put("project_type:$type"))
                     if (type == "mod") facets.put(JSONArray().put("categories:$loader"))
                     val path = "/search?query=" + java.net.URLEncoder.encode(query, "UTF-8") +
                         "&facets=" + java.net.URLEncoder.encode(facets.toString(), "UTF-8") + "&limit=25&index=" + (if (query.isEmpty()) "downloads" else "relevance")
@@ -413,7 +414,12 @@ class MainActivity : Activity() {
                         if (hits.length() == 0) list.addView(TextView(this).apply { text = tr("Ничего не найдено", "Nothing found"); setTextColor(Th.dim); setPadding(0, dp(16), 0, 0) })
                         for (i in 0 until hits.length()) {
                             val h = hits.getJSONObject(i)
-                            val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, dp(10)) }
+                            val outer = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, dp(10)) }
+                            val icon = ImageView(this).apply { setBackgroundColor(Th.line2); scaleType = ImageView.ScaleType.CENTER_CROP }
+                            outer.addView(icon, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginEnd = dp(12) })
+                            loadIcon(h.optString("icon_url", ""), icon)
+                            val row = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                            outer.addView(row, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                             row.addView(TextView(this).apply { text = h.getString("title"); textSize = 17f; setTextColor(Th.text); typeface = Typeface.DEFAULT_BOLD })
                             row.addView(TextView(this).apply { text = h.optString("author") + "  ·  ⬇ " + h.optInt("downloads"); textSize = 12f; setTextColor(Th.accent) })
                             row.addView(TextView(this).apply { text = h.optString("description"); textSize = 13f; setTextColor(Th.text2); maxLines = 3 })
@@ -422,7 +428,7 @@ class MainActivity : Activity() {
                             }
                             btn.setOnClickListener { installProject(h.getString("project_id"), type, loader, btn) }
                             row.addView(btn, LinearLayout.LayoutParams(dp(150), dp(40)).apply { topMargin = dp(6) })
-                            list.addView(row)
+                            list.addView(outer)
                             list.addView(View(this).apply { setBackgroundColor(Th.line2) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
                         }
                     }
@@ -437,7 +443,7 @@ class MainActivity : Activity() {
         val types = listOf("mod" to tr("Моды", "Mods"), "resourcepack" to tr("Ресурспаки", "Resource packs"), "shader" to tr("Шейдеры", "Shaders"))
         box.addView(chipRow(types.map { it.second }, 0) { i -> type = types[i].first; search() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12); bottomMargin = dp(6) })
         val loaders = listOf("fabric", "forge", "neoforge", "quilt")
-        box.addView(chipRow(loaders.map { it.replaceFirstChar { c -> c.uppercase() } }, 0) { i -> loader = loaders[i]; if (type == "mod") search() },
+        box.addView(chipRow(loaders.map { it.replaceFirstChar { c -> c.uppercase() } }, loaders.indexOf(loader)) { i -> loader = loaders[i]; if (type == "mod") search() },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12); bottomMargin = dp(6) })
         val sv = ScrollView(this); sv.addView(list)
         box.addView(sv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -446,15 +452,34 @@ class MainActivity : Activity() {
         return box
     }
 
+    private val iconCache = HashMap<String, android.graphics.Bitmap>()
+    private fun loadIcon(url: String, iv: ImageView) {
+        if (url.isEmpty()) return
+        iconCache[url]?.let { iv.setImageBitmap(it); return }
+        Thread {
+            try {
+                val c = URL(url).openConnection() as HttpURLConnection
+                c.connectTimeout = 10000; c.readTimeout = 15000
+                c.setRequestProperty("User-Agent", "Kumolix/Mobilix/1.4")
+                val bytes = c.inputStream.use { it.readBytes() }
+                val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+                val o2 = android.graphics.BitmapFactory.Options().apply { inSampleSize = maxOf(1, o.outWidth / 160) }
+                val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o2)
+                if (bmp != null) { iconCache[url] = bmp; runOnUiThread { iv.setImageBitmap(bmp) } }
+            } catch (_: Throwable) {}
+        }.start()
+    }
+
     private fun installProject(id: String, type: String, loader: String, btn: Button) {
         btn.isEnabled = false; btn.alpha = 0.6f; btn.text = tr("Скачивание…", "Downloading…")
         Thread {
             var res = ""
             try {
-                val g = "?game_versions=" + java.net.URLEncoder.encode("[\"$VERSION\"]", "UTF-8") +
+                val g = "?game_versions=" + java.net.URLEncoder.encode("[\"${curBase()}\"]", "UTF-8") +
                     (if (type == "mod") "&loaders=" + java.net.URLEncoder.encode("[\"$loader\"]", "UTF-8") else "")
                 val vers = JSONArray(apiGet("/project/$id/version$g"))
-                if (vers.length() == 0) throw RuntimeException(tr("нет файла для $VERSION", "no file for $VERSION"))
+                if (vers.length() == 0) throw RuntimeException(tr("нет файла для ${curBase()}", "no file for ${curBase()}"))
                 val files = vers.getJSONObject(0).getJSONArray("files")
                 var f = files.getJSONObject(0)
                 for (i in 0 until files.length()) if (files.getJSONObject(i).optBoolean("primary")) f = files.getJSONObject(i)
@@ -565,6 +590,74 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---------- установка версий ----------
+    /** Установленный профиль нужного типа для версии игры, либо null. */
+    private fun findProfile(kind: String, mc: String): String? {
+        val ids = installedProfiles()
+        return when (kind) {
+            "vanilla" -> ids.firstOrNull { it == mc && File(dataRoot(), "versions/$it/$it.jar").exists() }
+            "fabric" -> ids.firstOrNull { it.startsWith("fabric-loader-") && it.endsWith("-$mc") }
+            else -> ids.firstOrNull { it.startsWith("$mc-forge-") }
+        }
+    }
+
+    /** Скачивает версию (ванильную, Fabric или Forge) и выбирает её. Идёт в фоне, пока работает сервис. */
+    private fun installProfile(kind: String, mc: String, done: () -> Unit) {
+        setBusy(true)
+        Thread {
+            try {
+                val root = dataRoot()
+                logFile = File(root, "launcher.log").also { it.writeText("") }
+                var id = mc
+                when (kind) {
+                    "fabric" -> {
+                        log("Fabric $mc: поиск загрузчика…")
+                        val ls = JSONArray(fetchText("https://meta.fabricmc.net/v2/versions/loader/$mc"))
+                        var pick: String? = null
+                        for (i in 0 until ls.length()) {
+                            val l = ls.getJSONObject(i).getJSONObject("loader")
+                            if (l.optBoolean("stable")) { pick = l.getString("version"); break }
+                        }
+                        if (pick == null && ls.length() > 0) pick = ls.getJSONObject(0).getJSONObject("loader").getString("version")
+                        if (pick == null) throw RuntimeException("Fabric не поддерживает $mc")
+                        val prof = fetchText("https://meta.fabricmc.net/v2/versions/loader/$mc/$pick/profile/json")
+                        id = JSONObject(prof).getString("id")
+                        val f = File(root, "versions/$id/$id.json"); f.parentFile?.mkdirs(); f.writeText(prof)
+                        prepareAndRun(id, false)
+                    }
+                    "forge" -> {
+                        prepareAndRun(mc, false)
+                        val promos = JSONObject(fetchText("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json")).getJSONObject("promos")
+                        val fv = promos.optString("$mc-recommended", "").ifEmpty { promos.optString("$mc-latest", "") }
+                        if (fv.isEmpty()) throw RuntimeException("Forge для $mc не найден")
+                        val installer = File(root, "forge-installer.jar")
+                        installer.delete()
+                        log("Forge $mc-$fv: скачивание установщика…")
+                        downloadBig("https://maven.minecraftforge.net/net/minecraftforge/forge/$mc-$fv/forge-$mc-$fv-installer.jar", installer)
+                        val java = ensureRuntime(root, 21)
+                        val rt = java.parentFile!!.parentFile!!
+                        val lp = File(root, "launcher_profiles.json")
+                        if (!lp.exists()) lp.writeText("{\"profiles\":{}}")
+                        log("Forge: установка (это долго, потерпите)…")
+                        val code = runProcess(listOf(java.path, "-jar", installer.path, "--installClient", root.path), rt, root)
+                        if (code != 0) throw RuntimeException("Установщик Forge завершился с кодом $code")
+                        id = findProfile("forge", mc) ?: throw RuntimeException("Forge установился, но профиль не найден")
+                    }
+                    else -> prepareAndRun(mc, false)
+                }
+                prefs.edit().putString("profile", id).apply()
+                runOnUiThread { versionText.text = tr("Версия: ", "Version: ") + prettyProfile(id) }
+                log("Готово: $id")
+            } catch (e: Throwable) {
+                log("ОШИБКА установки: $e")
+                runOnUiThread { Toast.makeText(this, tr("Ошибка установки: ", "Install error: ") + e.message, Toast.LENGTH_LONG).show() }
+            } finally {
+                setBusy(false)
+                done()
+            }
+        }.start()
+    }
+
     // ---------- загрузчик версий ----------
     private fun versionsPage(): View {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -584,9 +677,6 @@ class MainActivity : Activity() {
         val vanilla = ArrayList<String>(); val fabric = ArrayList<String>(); val forge = ArrayList<String>()
         var loader = "all"
         val root = getExternalFilesDir(null) ?: filesDir
-        val installed = HashSet<String>()
-        File(root, "versions").listFiles()?.forEach { if (File(it, it.name + ".jar").exists()) installed.add(it.name) }
-        installed.add(VERSION)
         var loaded = false
 
         fun render() {
@@ -603,20 +693,27 @@ class MainActivity : Activity() {
                 list.addView(TextView(this).apply { text = name; textSize = 20f; setTextColor(Th.accent); setPadding(0, dp(18), 0, dp(6)) })
                 list.addView(View(this).apply { setBackgroundColor(0xFF2EA84F.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)))
                 for (v in f) {
-                    val inst = key == "vanilla" && installed.contains(v)
+                    val pid = findProfile(key, v)
+                    val sel = pid != null && pid == selectedProfile()
                     val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
                     r.addView(TextView(this).apply { text = v; textSize = 17f; setTextColor(Th.text) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                     r.addView(Button(this).apply {
-                        text = if (inst) tr("Установлена", "Installed") else tr("Скачать", "Download")
+                        text = when { sel -> tr("✓ Выбрана", "✓ Selected"); pid != null -> tr("Выбрать", "Select"); else -> tr("Скачать", "Download") }
                         isAllCaps = false; textSize = 12f; setTextColor(Color.WHITE)
-                        background = sel(if (inst) 0xFF14301D.toInt() else 0xFF2EA84F.toInt())
+                        background = sel(if (pid != null) 0xFF14301D.toInt() else 0xFF2EA84F.toInt())
                         setOnClickListener {
-                            Toast.makeText(this@MainActivity,
-                                if (inst) tr("Эта версия уже установлена", "Already installed")
-                                else tr("Установка этой версии появится позже", "Installing this version is coming soon"),
-                                Toast.LENGTH_SHORT).show()
+                            if (pid != null) {
+                                prefs.edit().putString("profile", pid).apply()
+                                versionText.text = tr("Версия: ", "Version: ") + prettyProfile(pid)
+                                render()
+                            } else if (busy) {
+                                Toast.makeText(this@MainActivity, tr("Подождите: идёт другая загрузка", "Wait: another download is in progress"), Toast.LENGTH_SHORT).show()
+                            } else {
+                                isEnabled = false; alpha = 0.6f; text = tr("Скачивание…", "Downloading…")
+                                installProfile(key, v) { runOnUiThread { render() } }
+                            }
                         }
-                    }, LinearLayout.LayoutParams(dp(120), dp(40)))
+                    }, LinearLayout.LayoutParams(dp(130), dp(40)))
                     list.addView(r)
                     list.addView(View(this).apply { setBackgroundColor(Th.line2) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
                 }
@@ -680,15 +777,18 @@ class MainActivity : Activity() {
     }
 
     private fun showVersions(anchor: View) {
-        val root = getExternalFilesDir(null) ?: filesDir
-        val installed = ArrayList<String>()
-        File(root, "versions").listFiles()?.forEach { if (File(it, it.name + ".jar").exists()) installed.add(it.name) }
-        if (!installed.contains(VERSION)) installed.add(0, VERSION)
+        val installed = ArrayList(installedProfiles())
+        if (installed.isEmpty()) installed.add(VERSION)
+        val cur = selectedProfile()
         val pm = android.widget.PopupMenu(this, anchor, Gravity.END)
-        installed.forEachIndexed { i, v -> pm.menu.add(0, i, i, v + if (v == VERSION) "  ✓" else "") }
-        pm.menu.add(1, 100, 100, tr("＋ Загрузить другую версию…", "＋ Download another version…"))
+        installed.forEachIndexed { i, v -> pm.menu.add(0, i, i, prettyProfile(v) + if (v == cur) "  ✓" else "") }
+        pm.menu.add(1, 1000, 1000, tr("＋ Загрузить другую версию…", "＋ Download another version…"))
         pm.setOnMenuItemClickListener {
-            if (it.itemId == 100) openPage(tr("Загрузчик версий", "Version loader"), versionsPage())
+            if (it.itemId == 1000) openPage(tr("Загрузчик версий", "Version loader"), versionsPage())
+            else {
+                prefs.edit().putString("profile", installed[it.itemId]).apply()
+                versionText.text = tr("Версия: ", "Version: ") + prettyProfile(installed[it.itemId])
+            }
             true
         }
         pm.show()
@@ -700,7 +800,7 @@ class MainActivity : Activity() {
             val root = getExternalFilesDir(null) ?: filesDir
             val cache = File(filesDir, "skin_default.png")
             if (!cache.exists()) {
-                val jar = File(root, "versions/$VERSION/$VERSION.jar")
+                val bv = curBase(); val jar = File(root, "versions/$bv/$bv.jar")
                 if (!jar.exists()) return
                 java.util.zip.ZipFile(jar).use { z ->
                     val e = listOf(
@@ -736,7 +836,10 @@ class MainActivity : Activity() {
         }
     }
 
+    @Volatile internal var busy = false
+
     private fun setBusy(b: Boolean) = runOnUiThread {
+        busy = b
         try {
             if (b) DownloadService.start(this) else DownloadService.stop(this)
         } catch (_: Throwable) {
@@ -860,40 +963,94 @@ class MainActivity : Activity() {
 
     // ---------- основной сценарий ----------
 
-    private fun prepareAndRun() {
+    internal fun selectedProfile(): String = prefs.getString("profile", VERSION) ?: VERSION
+
+    /** Базовая версия игры выбранного профиля (для Fabric/Forge берётся из inheritsFrom). */
+    internal fun curBase(): String {
+        val id = selectedProfile()
+        return try {
+            JSONObject(File(dataRoot(), "versions/$id/$id.json").readText()).optString("inheritsFrom", "").ifEmpty { id }
+        } catch (_: Exception) { id }
+    }
+
+    internal fun prettyProfile(id: String): String = when {
+        id.startsWith("fabric-loader-") -> "Fabric " + id.substringAfterLast("-") + " (" + id.removePrefix("fabric-loader-").substringBeforeLast("-") + ")"
+        id.contains("-forge-") -> "Forge " + id.substringBefore("-forge-") + " (" + id.substringAfter("-forge-") + ")"
+        else -> id
+    }
+
+    internal fun installedProfiles(): List<String> {
+        val out = ArrayList<String>()
+        File(dataRoot(), "versions").listFiles()?.sortedBy { it.name }?.forEach { if (File(it, it.name + ".json").exists()) out.add(it.name) }
+        return out
+    }
+
+    private fun mavenPath(name: String): String {
+        val ext = if (name.contains("@")) name.substringAfter("@") else "jar"
+        val p = name.substringBefore("@").split(":")
+        val g = p[0].replace('.', '/'); val a = p[1]; val ver = p[2]
+        return "$g/$a/$ver/$a-$ver" + (if (p.size > 3) "-" + p[3] else "") + ".$ext"
+    }
+
+    private fun mergeProfile(base: JSONObject, child: JSONObject?): JSONObject {
+        if (child == null) return base
+        val m = JSONObject(base.toString())
+        m.put("mainClass", child.getString("mainClass"))
+        val libs = JSONArray()
+        for (src in listOf(base, child)) {
+            val a = src.optJSONArray("libraries") ?: continue
+            for (i in 0 until a.length()) libs.put(a.get(i))
+        }
+        m.put("libraries", libs)
+        val args = JSONObject()
+        for (k in listOf("jvm", "game")) {
+            val arr = JSONArray()
+            for (src in listOf(base, child)) {
+                val a = src.optJSONObject("arguments")?.optJSONArray(k) ?: continue
+                for (i in 0 until a.length()) arr.put(a.get(i))
+            }
+            args.put(k, arr)
+        }
+        m.put("arguments", args)
+        return m
+    }
+
+    private fun prepareAndRun(profile: String = selectedProfile(), play: Boolean = true) {
         val root = dataRoot()
         val gameDir = File(root, "game").apply { mkdirs() }
         val assetsDir = File(root, "assets")
         val librariesDir = File(root, "libraries")
-        val natives = File(filesDir, "natives/$VERSION").apply { mkdirs() }
         logFile = File(root, "launcher.log").also { it.writeText("") }
+        val profFile = File(root, "versions/$profile/$profile.json")
+        val child: JSONObject? = if (profFile.exists()) JSONObject(profFile.readText()) else null
+        val baseVer = child?.optString("inheritsFrom", "")?.ifEmpty { null } ?: profile
+        val natives = File(filesDir, "natives/$baseVer").apply { mkdirs() }
         log("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MODEL}, ${Build.SUPPORTED_ABIS.joinToString()}")
         log("Папка данных: ${root.path}")
-        log("Версия $VERSION, ник ${nickName()}")
+        log("Профиль $profile (игра $baseVer), ник ${nickName()}")
 
-        // 1. Манифест версий -> json версии
-        val manifest = JSONObject(fetchText(MANIFEST_URL))
-        val versions = manifest.getJSONArray("versions")
-        var entry: JSONObject? = null
-        for (i in 0 until versions.length()) {
-            val o = versions.getJSONObject(i)
-            if (o.getString("id") == VERSION) {
-                entry = o
-                break
+        // 1. json ванильной версии
+        val versionJsonFile = File(root, "versions/$baseVer/$baseVer.json")
+        if (!versionJsonFile.exists()) {
+            val versions = JSONObject(fetchText(MANIFEST_URL)).getJSONArray("versions")
+            var entry: JSONObject? = null
+            for (i in 0 until versions.length()) {
+                val o = versions.getJSONObject(i)
+                if (o.getString("id") == baseVer) { entry = o; break }
+            }
+            val found = entry ?: throw RuntimeException("Версия $baseVer не найдена")
+            if (!download(found.getString("url"), versionJsonFile, found.getString("sha1"))) {
+                throw RuntimeException("Не удалось скачать описание версии")
             }
         }
-        val found = entry ?: throw RuntimeException("Версия $VERSION не найдена")
-        val versionJsonFile = File(root, "versions/$VERSION/$VERSION.json")
-        if (!download(found.getString("url"), versionJsonFile, found.getString("sha1"))) {
-            throw RuntimeException("Не удалось скачать описание версии")
-        }
-        val v = JSONObject(versionJsonFile.readText())
+        val v = mergeProfile(JSONObject(versionJsonFile.readText()), child)
         val javaMajor = v.optJSONObject("javaVersion")?.optInt("majorVersion", 0) ?: 0
         log("Нужна Java: $javaMajor")
+        if (v.optJSONObject("arguments") == null) throw RuntimeException("Эта версия слишком старая: её формат запуска пока не поддерживается")
 
         // 2. Клиентский jar
         val clientInfo = v.getJSONObject("downloads").getJSONObject("client")
-        val clientJar = File(root, "versions/$VERSION/$VERSION.jar")
+        val clientJar = File(root, "versions/$baseVer/$baseVer.jar")
         downloadAll(
             "Клиент игры",
             listOf(Task(clientInfo.getString("url"), clientJar, clientInfo.getString("sha1")))
@@ -903,17 +1060,28 @@ class MainActivity : Activity() {
         // 3. Библиотеки
         var lwjglVer = ""
         val libTasks = ArrayList<Task>()
-        val classpath = ArrayList<String>()
+        val cpMap = LinkedHashMap<String, String>()
         val libs = v.getJSONArray("libraries")
         for (i in 0 until libs.length()) {
             val lib = libs.getJSONObject(i)
             if (!allowed(lib)) continue
-            lib.optString("name").let { if (it.startsWith("org.lwjgl:lwjgl:")) lwjglVer = it.split(":")[2] }
-            val art = lib.optJSONObject("downloads")?.optJSONObject("artifact") ?: continue
-            val dest = File(librariesDir, art.getString("path"))
-            libTasks.add(Task(art.getString("url"), dest, art.optString("sha1", "").ifEmpty { null }))
-            classpath.add(dest.path)
+            val name = lib.optString("name")
+            if (name.startsWith("org.lwjgl:lwjgl:")) lwjglVer = name.split(":")[2]
+            val art = lib.optJSONObject("downloads")?.optJSONObject("artifact")
+            val path: String; var url: String?; var sha: String? = null
+            if (art != null) {
+                path = art.getString("path"); url = art.optString("url", ""); sha = art.optString("sha1", "").ifEmpty { null }
+            } else if (name.isNotEmpty()) {
+                path = mavenPath(name)
+                url = lib.optString("url", "https://libraries.minecraft.net/").trimEnd('/') + "/" + path
+            } else continue
+            val dest = File(librariesDir, path)
+            if (!url.isNullOrEmpty()) libTasks.add(Task(url, dest, sha)) else if (!dest.exists()) continue
+            val parts = name.split(":")
+            val key = if (parts.size >= 2) parts[0] + ":" + parts[1] + (if (parts.size > 3) ":" + parts[3] else "") else path
+            cpMap[key] = dest.path
         }
+        val classpath = ArrayList(cpMap.values)
         classpath.add(clientJar.path)
         downloadAll("Библиотеки", libTasks)
 
@@ -931,6 +1099,7 @@ class MainActivity : Activity() {
             assetTasks.add(Task(ASSETS_URL + p, File(assetsDir, "objects/$p"), hash))
         }
         downloadAll("Ресурсы", assetTasks, fatal = false)
+        if (!play) { log("Файлы версии скачаны."); return }
 
         // 5. Java-рантайм
         val java = ensureRuntime(root, javaMajor)
@@ -942,7 +1111,9 @@ class MainActivity : Activity() {
         applySkinPack(gameDir)
         val repl = mapOf(
             "auth_player_name" to nickName(),
-            "version_name" to VERSION,
+            "version_name" to profile,
+            "library_directory" to librariesDir.path,
+            "classpath_separator" to ":",
             "game_directory" to gameDir.path,
             "assets_root" to assetsDir.path,
             "assets_index_name" to indexId,
