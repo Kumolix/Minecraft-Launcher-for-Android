@@ -129,6 +129,10 @@ EXPORT void glfwMakeContextCurrent(void* w) {
 }
 EXPORT void* glfwGetCurrentContext(void) { return eglGetCurrentContext() != EGL_NO_CONTEXT ? (void*) &G : NULL; }
 EXPORT void glfwSwapInterval(int i) { if (G.dpy) eglSwapInterval(G.dpy, i); }
+static int g_fps = 0;
+static double g_lastFrame = 0;
+EXPORT void smc_set_fps(int fps) { g_fps = fps; }
+
 EXPORT void glfwSwapBuffers(void* w) {
     if (!G.created) return;
     if (!G.win) { usleep(30000); return; }            // поверхность потеряна (приложение свёрнуто)
@@ -142,6 +146,11 @@ EXPORT void glfwSwapBuffers(void* w) {
         LOG("поверхность пересоздана %dx%d", G.w, G.h);
     }
     if (eglSwapBuffers(G.dpy, G.surf) == EGL_FALSE) G.surf_dirty = G.win ? 1 : 0;
+    if (g_fps > 0) {                                   // ограничение FPS (стабилизация производительности)
+        double target = 1.0 / g_fps, t = now(), wait = g_lastFrame + target - t;
+        if (wait > 0 && wait < 0.2) usleep((useconds_t) (wait * 1e6));
+        g_lastFrame = now();
+    }
 }
 
 EXPORT void* glfwGetProcAddress(const char* name) {

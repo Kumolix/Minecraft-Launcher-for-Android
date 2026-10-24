@@ -29,8 +29,7 @@ object Native {
         System.loadLibrary("simplemc")
     }
 
-    @JvmStatic external fun eglClear(surface: Surface): String
-    @JvmStatic external fun startJvm(javaHome: String, options: Array<String>): String
+    @JvmStatic external fun setFpsCap(fps: Int)
     @JvmStatic external fun setSurface(surface: Surface, w: Int, h: Int)
     @JvmStatic external fun pushEvent(type: Int, a: Double, b: Double, c: Int)
     @JvmStatic external fun setGlLib(path: String)
@@ -57,9 +56,21 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
         super.onCreate(savedInstanceState)
         mode = intent.getStringExtra("mode") ?: "game"
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.BLACK))
+        if (fullscreen()) {
+            // рисуем и под вырезом фронтальной камеры
+            window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                window.attributes = window.attributes.apply {
+                    layoutInDisplayCutoutMode = if (android.os.Build.VERSION.SDK_INT >= 30)
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+        }
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or
+        window.decorView.systemUiVisibility = (if (fullscreen()) View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE else 0) or View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         val root = FrameLayout(this)
         val sv = SurfaceView(this)
@@ -164,14 +175,15 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
     private fun say(s: String) = runOnUiThread { logView.append(s + "\n") }
 
     // ---------- поверхность ----------
-    private fun renderScale(): Int = try {
-        JSONObject(File(filesDir, "game_settings.json").readText()).optInt("renderScale", 100).coerceIn(30, 100)
-    } catch (_: Throwable) { 100 }
+    private fun gs(): JSONObject = try { JSONObject(File(filesDir, "game_settings.json").readText()) } catch (_: Throwable) { JSONObject() }
+    private fun renderScale(): Int = gs().optInt("renderScale", 100).coerceIn(30, 100)
+    private fun fullscreen(): Boolean = gs().optBoolean("fullscreen", false)
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         val sc = renderScale()
         if (sc < 100) {
-            val dm = resources.displayMetrics
+            val dm = android.util.DisplayMetrics()
+            if (fullscreen()) windowManager.defaultDisplay.getRealMetrics(dm) else dm.setTo(resources.displayMetrics)
             val w = maxOf(dm.widthPixels, dm.heightPixels) * sc / 100
             val h = minOf(dm.widthPixels, dm.heightPixels) * sc / 100
             holder.setFixedSize(w, h)
@@ -197,42 +209,7 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
         if (started) return
         started = true
         say("Экран: ${width}x$height")
-        val surface = holder.surface
-        if (mode == "test") {
-            Thread {
-                try {
-                    say(Native.eglClear(surface))
-                    startJvmTest()
-                } catch (e: Throwable) {
-                    say("ОШИБКА: $e")
-                }
-            }.start()
-        } else {
-            Thread(null, { runGame() }, "game-main", 32L * 1024 * 1024).start()
-        }
-    }
-
-    private fun findJavaHome(): File? {
-        val rt = File(filesDir, "runtime")
-        val java = rt.walkTopDown().maxDepth(4)
-            .firstOrNull { it.isFile && it.name == "java" && it.parentFile?.name == "bin" }
-        return java?.parentFile?.parentFile
-    }
-
-    private fun startJvmTest() {
-        val home = findJavaHome()
-        if (home == null) {
-            say("Java-рантайм не установлен. Сначала нажмите «Играть» в главном окне.")
-            return
-        }
-        val opts = arrayOf("-Xmx512M", "-XX:+UseSerialGC", "-Xrs", "-Djava.io.tmpdir=${cacheDir.path}", "-Djava.awt.headless=true")
-        Thread(null, {
-            try {
-                say(Native.startJvm(home.path, opts))
-            } catch (e: Throwable) {
-                say("ОШИБКА JVM: $e")
-            }
-        }, "jvm-start", 16L * 1024 * 1024).start()
+        Thread(null, { runGame() }, "game-main", 32L * 1024 * 1024).start()
     }
 
     // ---------- игра ----------
@@ -281,6 +258,7 @@ class GameActivity : Activity(), SurfaceHolder.Callback {
             Native.redirectOutput(log.path)
             runOnUiThread { handler.post(tailer) }
 
+            try { Native.setFpsCap(gs().optInt("fps", 0)) } catch (_: Throwable) {}
             val gl = j.optString("glLib", "")
             if (gl.isNotEmpty()) Native.setGlLib(gl)
             say("Запуск Minecraft в процессе...")

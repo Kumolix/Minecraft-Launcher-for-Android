@@ -66,6 +66,15 @@ class ControlsView(ctx: Context) : View(ctx) {
     val buttons = ArrayList<Btn>()
     var sens = 1.0f
     var gameScale = 1f
+    private val joy: Boolean = try { JSONObject(File(ctx.filesDir, "game_settings.json").readText()).optBoolean("joystick", false) } catch (_: Throwable) { false }
+    private var joyPtr = -1
+    private var jdx = 0f
+    private var jdy = 0f
+    private val joyKeys = booleanArrayOf(false, false, false, false, false) // W A S D Ctrl
+    private fun isDpad(b: Btn) = joy && b.kind == K_KEY && b.label in setOf("▲", "▼", "◀", "▶")
+    private fun joyCx() = 0.13f * width
+    private fun joyCy() = 0.74f * height
+    private fun joyR() = 62f * d
     private var hidden = false
     var editing = false
         set(v) { field = v; if (!v) save(); invalidate() }
@@ -183,6 +192,7 @@ class ControlsView(ctx: Context) : View(ctx) {
     override fun onDraw(c: Canvas) {
         for (b in buttons) {
             if (hidden && !editing && b.kind != K_HIDE) continue
+            if (isDpad(b)) continue
             val r = rect(b)
             fill.color = if (b.pressed || b.on) 0xAAFFFFFF.toInt() else if (editing) 0x66FFD54F else 0x44FFFFFF
             c.drawRoundRect(r, 14f * d, 14f * d, fill)
@@ -191,6 +201,13 @@ class ControlsView(ctx: Context) : View(ctx) {
             txt.color = if (b.pressed || b.on) Color.BLACK else Color.WHITE
             txt.textSize = (if (b.label.length > 3) 11f else 15f).coerceAtMost(b.h * 0.4f) * d
             c.drawText(b.label, r.centerX(), r.centerY() + txt.textSize * 0.35f, txt)
+        }
+        if (joy && (!hidden || editing)) {
+            val cx = joyCx(); val cy = joyCy(); val r = joyR()
+            fill.color = 0x33FFFFFF; c.drawCircle(cx, cy, r, fill)
+            line.color = 0x88FFFFFF.toInt(); c.drawCircle(cx, cy, r, line)
+            fill.color = if (joyPtr >= 0) 0xCCFFFFFF.toInt() else 0x88FFFFFF.toInt()
+            c.drawCircle(cx + jdx, cy + jdy, r * 0.42f, fill)
         }
         if (editing) {
             txt.color = Color.YELLOW; txt.textSize = 13f * d
@@ -201,7 +218,32 @@ class ControlsView(ctx: Context) : View(ctx) {
     // ---------- события ----------
     private fun cursorDisabled() = try { Native.cursorMode() == 0x34003 } catch (_: Throwable) { false }
 
-    private fun hit(x: Float, y: Float): Btn? = buttons.lastOrNull { (!hidden || editing || it.kind == K_HIDE) && rect(it).contains(x, y) }
+    private fun setJoyKey(i: Int, on: Boolean) {
+        if (joyKeys[i] == on) return
+        joyKeys[i] = on
+        val code = intArrayOf('W'.code, 'A'.code, 'S'.code, 'D'.code, 341)[i]
+        try { Native.pushEvent(1, code.toDouble(), 0.0, if (on) 1 else 0) } catch (_: Throwable) {}
+    }
+
+    private fun joyUpdate(x: Float, y: Float) {
+        val r = joyR()
+        var dx = x - joyCx(); var dy = y - joyCy()
+        val len = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+        val maxLen = r * 1.6f
+        if (len > maxLen) { dx *= maxLen / len; dy *= maxLen / len }
+        jdx = dx.coerceIn(-r, r); jdy = dy.coerceIn(-r, r)   // ручка рисуется внутри круга
+        val dead = r * 0.3f
+        setJoyKey(0, dy < -dead); setJoyKey(2, dy > dead)
+        setJoyKey(1, dx < -dead); setJoyKey(3, dx > dead)
+        setJoyKey(4, len > r * 1.15f && dy < -dead)           // бег: потянуть за край вперёд
+    }
+
+    private fun joyRelease() {
+        joyPtr = -1; jdx = 0f; jdy = 0f
+        for (i in 0..4) setJoyKey(i, false)
+    }
+
+    private fun hit(x: Float, y: Float): Btn? = buttons.lastOrNull { (!hidden || editing || it.kind == K_HIDE) && !isDpad(it) && rect(it).contains(x, y) }
 
     private var kbd = false
     private fun pk(type: Int, a: Int) { try { Native.pushEvent(type, a.toDouble(), 0.0, 0) } catch (_: Throwable) {} }
@@ -277,7 +319,10 @@ class ControlsView(ctx: Context) : View(ctx) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 val x = e.getX(idx); val y = e.getY(idx)
                 val b = hit(x, y)
-                if (b != null) {
+                if (joy && !editing && b == null && Math.hypot((x - joyCx()).toDouble(), (y - joyCy()).toDouble()) < joyR() * 1.5) {
+                    joyPtr = id; joyUpdate(x, y)
+                    owners[id] = Owner.Gui   // чтобы подъём пальца не считался кликом
+                } else if (b != null) {
                     owners[id] = Owner.B(b, x, y)
                     if (!editing) press(b, true)
                 } else if (editing) {
@@ -294,6 +339,7 @@ class ControlsView(ctx: Context) : View(ctx) {
                 for (i in 0 until e.pointerCount) {
                     val o = owners[e.getPointerId(i)] ?: continue
                     val x = e.getX(i); val y = e.getY(i)
+                    if (e.getPointerId(i) == joyPtr) { joyUpdate(x, y); continue }
                     when (o) {
                         is Owner.B -> if (editing) {
                             if (Math.abs(x - o.sx) > 8 * d || Math.abs(y - o.sy) > 8 * d) o.moved = true
@@ -315,6 +361,7 @@ class ControlsView(ctx: Context) : View(ctx) {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
                 val o = owners.remove(id)
+                if (id == joyPtr) { joyRelease(); invalidate(); return true }
                 val x = e.getX(idx); val y = e.getY(idx)
                 when (o) {
                     is Owner.B -> if (editing) { if (!o.moved) editButton(o.b) else save() } else if (!o.b.toggle) press(o.b, false)
@@ -324,6 +371,7 @@ class ControlsView(ctx: Context) : View(ctx) {
                     else -> {}
                 }
                 if (e.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    joyRelease()
                     buttons.forEach { if (it.pressed) { it.pressed = false; fire(it, false) } }
                 }
             }

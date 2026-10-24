@@ -25,46 +25,6 @@
 
 static jstring mk(JNIEnv* env, const char* s) { return (*env)->NewStringUTF(env, s); }
 
-JNIEXPORT jstring JNICALL Java_dev_mclauncher_Native_eglClear(JNIEnv* env, jclass cls, jobject surface) {
-    char out[1024];
-    ANativeWindow* win = ANativeWindow_fromSurface(env, surface);
-    if (!win) return mk(env, "EGL: ANativeWindow_fromSurface вернул NULL");
-    EGLDisplay dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    EGLint maj = 0, min = 0;
-    if (!eglInitialize(dpy, &maj, &min)) {
-        snprintf(out, sizeof out, "EGL: eglInitialize не удалось (0x%x)", eglGetError());
-        return mk(env, out);
-    }
-    const EGLint cfgAttr[] = {
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
-        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
-        EGL_DEPTH_SIZE, 24, EGL_NONE };
-    EGLConfig cfg; EGLint n = 0;
-    if (!eglChooseConfig(dpy, cfgAttr, &cfg, 1, &n) || n < 1) {
-        snprintf(out, sizeof out, "EGL: нет подходящей конфигурации (0x%x)", eglGetError());
-        return mk(env, out);
-    }
-    EGLSurface surf = eglCreateWindowSurface(dpy, cfg, win, NULL);
-    const EGLint ctxAttr[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
-    EGLContext ctx = eglCreateContext(dpy, cfg, EGL_NO_CONTEXT, ctxAttr);
-    if (surf == EGL_NO_SURFACE || ctx == EGL_NO_CONTEXT) {
-        snprintf(out, sizeof out, "EGL: не создан surface/context (0x%x)", eglGetError());
-        return mk(env, out);
-    }
-    if (!eglMakeCurrent(dpy, surf, surf, ctx)) {
-        snprintf(out, sizeof out, "EGL: eglMakeCurrent не удалось (0x%x)", eglGetError());
-        return mk(env, out);
-    }
-    const char* ver = (const char*) glGetString(GL_VERSION);
-    const char* ren = (const char*) glGetString(GL_RENDERER);
-    glClearColor(0.0f, 0.42f, 0.47f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    eglSwapBuffers(dpy, surf);
-    snprintf(out, sizeof out, "EGL %d.%d OK. GL: %s | %s", maj, min, ver ? ver : "?", ren ? ren : "?");
-    eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    LOG("%s", out);
-    return mk(env, out);
-}
 
 typedef jint (*CreateJvmFn)(JavaVM**, void**, void*);
 
@@ -127,20 +87,6 @@ static jint create_jvm(JNIEnv* env, jstring javaHome, jobjectArray opts, JavaVM*
     return 0;
 }
 
-JNIEXPORT jstring JNICALL Java_dev_mclauncher_Native_startJvm(JNIEnv* env, jclass cls, jstring javaHome, jobjectArray opts) {
-    char out[2048], e[512];
-    JavaVM* jvm = NULL; JNIEnv* jenv = NULL;
-    if (create_jvm(env, javaHome, opts, &jvm, &jenv, e, sizeof e) != 0) return mk(env, e);
-    jclass sys = (*jenv)->FindClass(jenv, "java/lang/System");
-    jmethodID gp = (*jenv)->GetStaticMethodID(jenv, sys, "getProperty", "(Ljava/lang/String;)Ljava/lang/String;");
-    char ver[128], vm[128], arch[64];
-    getProp(jenv, sys, gp, "java.version", ver, sizeof ver);
-    getProp(jenv, sys, gp, "java.vm.name", vm, sizeof vm);
-    getProp(jenv, sys, gp, "os.arch", arch, sizeof arch);
-    snprintf(out, sizeof out, "JVM в процессе приложения запущена: Java %s, %s, %s", ver, vm, arch);
-    LOG("%s", out);
-    return mk(env, out);
-}
 
 // Запуск main(String[]) внутри процесса. Блокирует до завершения игры.
 JNIEXPORT jstring JNICALL Java_dev_mclauncher_Native_runMain(JNIEnv* env, jclass cls, jstring javaHome,
@@ -222,3 +168,6 @@ extern void smc_surface_lost(void);
 JNIEXPORT void JNICALL Java_dev_mclauncher_Native_surfaceLost(JNIEnv* env, jclass cls) { smc_surface_lost(); }
 extern int smc_cursor_mode(void);
 JNIEXPORT jint JNICALL Java_dev_mclauncher_Native_cursorMode(JNIEnv* env, jclass cls) { return smc_cursor_mode(); }
+
+extern void smc_set_fps(int fps);
+JNIEXPORT void JNICALL Java_dev_mclauncher_Native_setFpsCap(JNIEnv* env, jclass cls, jint fps) { smc_set_fps(fps); }

@@ -46,8 +46,8 @@ import java.util.zip.ZipInputStream
 class MainActivity : Activity() {
 
     companion object {
-        const val INPROCESS = true
         const val NICK = "Player"
+        const val DEFAULT_MIRROR = "https://api.modrinth.black/v2"
         const val VERSION = "1.21.3"
         const val MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
         const val ASSETS_URL = "https://resources.download.minecraft.net/"
@@ -95,6 +95,24 @@ class MainActivity : Activity() {
     private lateinit var ghItem: TextView
     private var updateVer: String? = null
 
+    private fun socialPage(): View {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(24), dp(24), dp(24)) }
+        fun link(title: String, sub: String, url: String, hi: Boolean = false) {
+            val t = TextView(this).apply {
+                text = title + "\n" + sub; textSize = 16f; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(18), 0, dp(18), 0)
+                setTextColor(if (hi) Th.altText else Color.WHITE)
+                background = sel(if (hi) Th.altBg else 0xFF14301D.toInt()); isClickable = true
+                setOnClickListener { try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) } catch (_: Exception) {} }
+            }
+            col.addView(t, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(72)).apply { bottomMargin = dp(12) })
+        }
+        link("GitHub", if (updateVer != null) tr("● Вышло обновление $updateVer", "● Update $updateVer available") else "Kumolix/Minecraft-Launcher-for-Android",
+            "https://github.com/Kumolix/Minecraft-Launcher-for-Android", updateVer != null)
+        link("TikTok", "@mobilix_launcher", "https://www.tiktok.com/@mobilix_launcher")
+        link("Telegram", "@mobilix_launcher", "https://t.me/mobilix_launcher")
+        return col
+    }
+
     private fun openGithub() {
         try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/Kumolix/Minecraft-Launcher-for-Android"))) } catch (_: Exception) {}
     }
@@ -118,7 +136,7 @@ class MainActivity : Activity() {
             runOnUiThread {
                 verLabel.text = "v-$cur  ·  ⬆ " + tr("Вышло обновление $remote", "Update $remote available")
                 verLabel.setTextColor(Th.accent); verLabel.typeface = Typeface.DEFAULT_BOLD
-                ghItem.text = "● GitHub: " + tr("есть обновление $remote", "update $remote")
+                ghItem.text = "● " + tr("Соцсети: обновление $remote", "Social: update $remote")
                 ghItem.setTextColor(Th.altText); ghItem.background = sel(Th.altBg)
                 if (prefs.getString("updToast", "") != remote) {
                     prefs.edit().putString("updToast", remote).apply()
@@ -253,7 +271,7 @@ class MainActivity : Activity() {
         item("Каталог", "Catalog") { openPage(tr("Каталог", "Catalog"), catalogPage()) }
         item("Раскладка управления", "Controls layout") { startActivity(Intent(this, ControlsEditorActivity::class.java)) }
         menuWipe = item("Удалить скачанное", "Delete downloads") { confirmWipe() }
-        ghItem = item("GitHub", "GitHub") { openGithub() }
+        ghItem = item("Соцсети", "Social") { openPage(tr("Соцсети", "Social"), socialPage()) }
         item("Язык", "Language") { chooseLanguage() }
         drawer.addView(View(this).apply { setBackgroundColor(Th.line) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
         rootFrame.addView(drawer, FrameLayout.LayoutParams(drawerW, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -334,11 +352,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun stubPage(text: String) = FrameLayout(this).apply {
-        addView(TextView(context).apply { this.text = text; textSize = 16f; setTextColor(Th.dim); gravity = Gravity.CENTER; setPadding(dp(32), 0, dp(32), 0) },
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-    }
-
     private fun chooseLanguage() {
         AlertDialog.Builder(this).setTitle(tr("Язык", "Language"))
             .setItems(arrayOf("Русский", "English")) { _, i ->
@@ -372,6 +385,37 @@ class MainActivity : Activity() {
 
     private fun note(t: String) = TextView(this).apply { text = t; textSize = 12f; setTextColor(Th.dim); setPadding(0, dp(6), 0, 0) }
 
+    /** Настройки для процесса игры (читаются в GameActivity и ControlsView). */
+    internal fun writeGameSettings() {
+        try {
+            File(filesDir, "game_settings.json").writeText(JSONObject()
+                .put("renderScale", prefs.getInt("renderScale", 100))
+                .put("joystick", prefs.getBoolean("joystick", false))
+                .put("fps", prefs.getInt("fps", 0))
+                .put("fullscreen", prefs.getBoolean("fullscreen", false)).toString())
+        } catch (_: Exception) {}
+    }
+
+    private fun openGameFolder() {
+        val dir = File(dataRoot(), "game").apply { mkdirs() }
+        try {
+            val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("path", dir.path))
+        } catch (_: Exception) {}
+        try {
+            startActivity(Intent("samsung.myfiles.intent.action.LAUNCH_MY_FILES").setPackage("com.sec.android.app.myfiles")
+                .putExtra("samsung.myfiles.intent.extra.START_PATH", dir.path))
+            return
+        } catch (_: Exception) {}
+        try {
+            val rel = dir.path.substringAfter("/storage/emulated/0/")
+            val uri = android.provider.DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:$rel")
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "vnd.android.document/directory").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        } catch (_: Exception) {}
+        Toast.makeText(this, tr("Не удалось открыть проводник. Путь скопирован: ", "Could not open the file manager. Path copied: ") + dir.path, Toast.LENGTH_LONG).show()
+    }
+
     private fun settingsPage(): View {
         val sv = ScrollView(this)
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), dp(24)) }
@@ -381,6 +425,16 @@ class MainActivity : Activity() {
             prefs.edit().putString("theme", if (i == 1) "light" else "dark").apply()
             recreate()
         })
+        col.addView(TextView(this).apply { text = tr("Управление движением", "Movement control"); setTextColor(Th.text); setPadding(0, dp(16), 0, dp(6)) })
+        col.addView(chipRow(listOf(tr("Крестовина (WASD)", "D-pad (WASD)"), tr("Джойстик", "Joystick")), if (prefs.getBoolean("joystick", false)) 1 else 0) { i ->
+            prefs.edit().putBoolean("joystick", i == 1).apply(); writeGameSettings()
+        })
+        col.addView(note(tr("Джойстик: тяните в сторону, чтобы идти; за край круга — бег.", "Joystick: drag to walk; beyond the ring to sprint.")))
+        col.addView(Button(this).apply {
+            text = tr("Открыть папку игры", "Open game folder"); isAllCaps = false; setTextColor(Color.WHITE); background = sel(0xFF14301D.toInt())
+            setOnClickListener { openGameFolder() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)).apply { topMargin = dp(14) })
+        col.addView(note(tr("Откроется «Мои файлы» (Samsung) или стандартный проводник. Путь также скопирован в буфер.", "Opens My Files (Samsung) or the system file manager. The path is also copied.")))
         col.addView(header(tr("Игра", "Game")))
         val cur = prefs.getInt("renderScale", 100)
         val lbl = TextView(this).apply { text = tr("Разрешение рендера: $cur%", "Render resolution: $cur%"); setTextColor(Th.text) }
@@ -393,12 +447,23 @@ class MainActivity : Activity() {
                 override fun onStopTrackingTouch(sb: SeekBar?) {
                     val v = (sb?.progress ?: 70) + 30
                     prefs.edit().putInt("renderScale", v).apply()
-                    try { File(filesDir, "game_settings.json").writeText(JSONObject().put("renderScale", v).toString()) } catch (_: Exception) {}
+                    writeGameSettings()
                 }
             })
         })
         col.addView(note(tr("Игра рисуется в меньшем разрешении и растягивается на весь экран: меньше нагрузка на GPU, выше FPS. Размытия нет, это именно снижение числа пикселей. Применяется при следующем запуске.",
             "The game renders at a lower resolution and is scaled to the full screen: lower GPU load, higher FPS. Applied on next launch.")))
+        col.addView(TextView(this).apply { text = tr("Стабилизация производительности", "Performance stabilization"); setTextColor(Th.text); setPadding(0, dp(18), 0, dp(6)) })
+        val fpsOpts = listOf(0, 60, 45, 30)
+        col.addView(chipRow(listOf(tr("Выкл", "Off"), "60", "45", "30"), fpsOpts.indexOf(prefs.getInt("fps", 0)).coerceAtLeast(0)) { i ->
+            prefs.edit().putInt("fps", fpsOpts[i]).apply(); writeGameSettings()
+        })
+        col.addView(note(tr("Ограничивает FPS: меньше нагрев и расход батареи, но и частота кадров ниже. Применяется при запуске.", "Caps FPS: less heat and battery use, but lower frame rate. Applied on launch.")))
+        col.addView(TextView(this).apply { text = tr("Полноэкранный режим", "Full screen mode"); setTextColor(Th.text); setPadding(0, dp(18), 0, dp(6)) })
+        col.addView(chipRow(listOf(tr("Выкл", "Off"), tr("Вкл", "On")), if (prefs.getBoolean("fullscreen", false)) 1 else 0) { i ->
+            prefs.edit().putBoolean("fullscreen", i == 1).apply(); writeGameSettings()
+        })
+        col.addView(note(tr("Игра рисуется и под вырезом фронтальной камеры. Если появится серая полоса — выключите.", "The game draws under the front camera cutout. If a grey bar appears, turn it off.")))
         val mi = android.app.ActivityManager.MemoryInfo()
         (getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
         val totalMb = (mi.totalMem / 1024 / 1024).toInt()
@@ -424,18 +489,36 @@ class MainActivity : Activity() {
         col.addView(xs)
         col.addView(note(tr("Больше памяти полезно для модов, но слишком большое значение система может «убить». Всего ОЗУ: $totalMb МБ. Применяется при следующем запуске.",
             "More memory helps with mods, but too large a value may get the game killed. Total RAM: $totalMb MB. Applied on next launch.")))
+        col.addView(TextView(this).apply { text = tr("Настройки JVM", "JVM settings"); setTextColor(Th.text); setPadding(0, dp(18), 0, dp(6)) })
+        val gcs = listOf("Serial", "Parallel", "G1")
+        col.addView(chipRow(gcs, gcs.indexOf(prefs.getString("gc", "Serial")).coerceAtLeast(0)) { i -> prefs.edit().putString("gc", gcs[i]).apply() })
+        col.addView(android.widget.EditText(this).apply {
+            hint = "-XX:+UseG1GC -Dfoo=bar"; setHintTextColor(Th.hint); setTextColor(Th.text); setSingleLine(true)
+            setText(prefs.getString("jvmArgs", ""))
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun afterTextChanged(e: android.text.Editable?) { prefs.edit().putString("jvmArgs", e.toString().trim()).apply() }
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            })
+        })
+        col.addView(note(tr("Сборщик мусора и дополнительные аргументы (через пробел). Неверный аргумент может сломать запуск.", "Garbage collector and extra arguments (space-separated). A wrong argument can break launch.")))
         col.addView(header(tr("Специальное", "Special")))
         col.addView(TextView(this).apply { text = tr("Источник каталога", "Catalog source"); setTextColor(Th.text); setPadding(0, 0, 0, dp(6)) })
         col.addView(chipRow(listOf("Modrinth", "Modrinth Black"), prefs.getInt("modSource", 2) - 1) { i -> prefs.edit().putInt("modSource", i + 1).apply() })
         col.addView(TextView(this).apply { text = tr("Адрес API зеркала", "Mirror API address"); setTextColor(Th.text); setPadding(0, dp(14), 0, 0) })
-        col.addView(android.widget.EditText(this).apply {
-            setText(prefs.getString("mirrorApi", "https://api.modrinth.black/v2")); setTextColor(Th.text); setSingleLine(true)
+        val mirror = android.widget.EditText(this).apply {
+            setText(prefs.getString("mirrorApi", DEFAULT_MIRROR)); setTextColor(Th.text); setSingleLine(true)
             addTextChangedListener(object : android.text.TextWatcher {
                 override fun afterTextChanged(e: android.text.Editable?) { prefs.edit().putString("mirrorApi", e.toString().trim()).apply() }
                 override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                 override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             })
-        })
+        }
+        col.addView(mirror)
+        col.addView(Button(this).apply {
+            text = tr("Сбросить адрес", "Reset address"); isAllCaps = false; setTextColor(Color.WHITE); background = sel(0xFF14301D.toInt())
+            setOnClickListener { mirror.setText(DEFAULT_MIRROR); prefs.edit().putString("mirrorApi", DEFAULT_MIRROR).apply() }
+        }, LinearLayout.LayoutParams(dp(180), dp(40)).apply { topMargin = dp(6) })
         col.addView(note(tr("Если Modrinth недоступен, выберите Modrinth Black. Если зеркало не отвечает, поправьте адрес API здесь.",
             "If Modrinth is unreachable, choose Modrinth Black. If the mirror does not respond, fix the API address here.")))
         sv.addView(col)
@@ -1341,7 +1424,8 @@ class MainActivity : Activity() {
         val xmx = if (manualX > 0) manualX else when { totalMb < 5000 -> 1024; totalMb < 10000 -> 1536; else -> 2048 }
         log("ОЗУ устройства: $totalMb МБ, память игры: $xmx МБ")
         cmd.add("-Xmx${xmx}M")
-        cmd.add("-XX:+UseSerialGC")
+        cmd.add(when (prefs.getString("gc", "Serial")) { "G1" -> "-XX:+UseG1GC"; "Parallel" -> "-XX:+UseParallelGC"; else -> "-XX:+UseSerialGC" })
+        prefs.getString("jvmArgs", "")?.split(Regex("\\s+"))?.filter { it.startsWith("-") }?.forEach { cmd.add(it) }
         cmd.add("-XX:ErrorFile=${File(gameDir, "hs_err.log").path}")
         cmd.add("-Djava.io.tmpdir=${cacheDir.path}")
         cmd.add("-Duser.home=${gameDir.path}")
@@ -1379,28 +1463,9 @@ class MainActivity : Activity() {
         }
         log("Java работает.")
 
-        if (INPROCESS) {
-            log("Открываю окно игры...")
-            runOnUiThread {
-                startActivity(Intent(this, GameActivity::class.java).putExtra("mode", "game"))
-            }
-            return
-        }
-
-        // 8. Запуск игры (отдельным процессом, без экрана)
-        log("Запуск игры...")
-        File(gameDir, "hs_err.log").delete()
-        val gameCode = runProcess(cmd, rt, gameDir)
-        log("Процесс игры завершён, код $gameCode")
-        if (gameCode != 0) {
-            val hs = File(gameDir, "hs_err.log")
-            if (hs.exists()) {
-                log("--- hs_err.log (начало) ---")
-                hs.readLines().take(45).forEach { log(it) }
-                log("--- конец ---")
-            } else {
-                log("hs_err.log не создан: процесс убит системой или оборван на низком уровне.")
-            }
+        log("Открываю окно игры...")
+        runOnUiThread {
+            startActivity(Intent(this, GameActivity::class.java).putExtra("mode", "game"))
         }
     }
 
@@ -1705,19 +1770,6 @@ class MainActivity : Activity() {
     }
 
     /** Системный журнал приложения: там бывает трасса падения нативного кода. */
-    private fun logcatTail() {
-        try {
-            val p = ProcessBuilder("logcat", "-d", "-v", "brief", "-t", "400").redirectErrorStream(true).start()
-            val keep = Regex("DEBUG|libc|F/|backtrace|signal|#\\d+ pc|Abort|tombstone|SIGSEGV|SIGABRT|scudo|tag", RegexOption.IGNORE_CASE)
-            val lines = p.inputStream.bufferedReader().readLines().filter { keep.containsMatchIn(it) }
-            log("--- logcat (важные строки: ${lines.size}) ---")
-            lines.takeLast(60).forEach { log(it.take(220)) }
-            log("--- конец ---")
-        } catch (e: Exception) {
-            log("logcat недоступен: $e")
-        }
-    }
-
     private fun runProcess(cmd: List<String>, rt: File, workDir: File): Int {
         val pb = ProcessBuilder(cmd).directory(workDir).redirectErrorStream(true)
         val env = pb.environment()
