@@ -91,6 +91,42 @@ class MainActivity : Activity() {
     private var drawerOpen = false
     private var pageOpen = false
     private var accountSkin: SkinView? = null
+    private lateinit var verLabel: TextView
+    private lateinit var ghItem: TextView
+    private var updateVer: String? = null
+
+    private fun openGithub() {
+        try { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/Kumolix/Minecraft-Launcher-for-Android"))) } catch (_: Exception) {}
+    }
+
+    private fun verParts(v: String): List<Int>? = try { v.trim().split(".").map { it.toInt() } } catch (_: Exception) { null }
+
+    /** Сверяет номер версии в репозитории с установленной; при новой показывает метку на главном экране и подсвечивает GitHub в меню. */
+    private fun checkUpdate() {
+        try {
+            val remote = fetchText("https://raw.githubusercontent.com/Kumolix/Minecraft-Launcher-for-Android/main/VERSION").trim()
+            val cur = packageManager.getPackageInfo(packageName, 0).versionName ?: return
+            val r = verParts(remote) ?: return
+            val c = verParts(cur) ?: return
+            var newer = false
+            for (i in 0 until maxOf(r.size, c.size)) {
+                val a = r.getOrElse(i) { 0 }; val b = c.getOrElse(i) { 0 }
+                if (a != b) { newer = a > b; break }
+            }
+            if (!newer) return
+            updateVer = remote
+            runOnUiThread {
+                verLabel.text = "v-$cur  ·  ⬆ " + tr("Вышло обновление $remote", "Update $remote available")
+                verLabel.setTextColor(Th.accent); verLabel.typeface = Typeface.DEFAULT_BOLD
+                ghItem.text = "● GitHub: " + tr("есть обновление $remote", "update $remote")
+                ghItem.setTextColor(Th.altText); ghItem.background = sel(Th.altBg)
+                if (prefs.getString("updToast", "") != remote) {
+                    prefs.edit().putString("updToast", remote).apply()
+                    Toast.makeText(this, tr("Вышло обновление Mobilix $remote", "Mobilix update $remote is available"), Toast.LENGTH_LONG).show()
+                }
+            }
+        } catch (_: Throwable) {}
+    }
 
     private val prefs get() = getSharedPreferences("launcher", MODE_PRIVATE)
     internal fun lang() = prefs.getString("lang", "ru") ?: "ru"
@@ -127,7 +163,11 @@ class MainActivity : Activity() {
         val top = FrameLayout(this).apply { setBackgroundColor(Th.bar) }
         val titleBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
         titleBox.addView(TextView(this).apply { text = "Mobilix"; textSize = 22f; setTextColor(Th.accent); gravity = Gravity.CENTER; typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); letterSpacing = 0.12f })
-        titleBox.addView(TextView(this).apply { text = versionLabel(); textSize = 11f; setTextColor(Th.dim); gravity = Gravity.CENTER })
+        verLabel = TextView(this).apply {
+            text = versionLabel(); textSize = 11f; setTextColor(Th.dim); gravity = Gravity.CENTER
+            setOnClickListener { if (updateVer != null) openGithub() }
+        }
+        titleBox.addView(verLabel)
         top.addView(titleBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56), Gravity.CENTER))
         root.addView(top, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
 
@@ -213,6 +253,7 @@ class MainActivity : Activity() {
         item("Каталог", "Catalog") { openPage(tr("Каталог", "Catalog"), catalogPage()) }
         item("Раскладка управления", "Controls layout") { startActivity(Intent(this, ControlsEditorActivity::class.java)) }
         menuWipe = item("Удалить скачанное", "Delete downloads") { confirmWipe() }
+        ghItem = item("GitHub", "GitHub") { openGithub() }
         item("Язык", "Language") { chooseLanguage() }
         drawer.addView(View(this).apply { setBackgroundColor(Th.line) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
         rootFrame.addView(drawer, FrameLayout.LayoutParams(drawerW, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -232,6 +273,7 @@ class MainActivity : Activity() {
 
         setContentView(rootFrame)
         Thread { loadSkin() }.start()
+        Thread { checkUpdate() }.start()
     }
 
     // ---------- меню и страницы ----------
@@ -357,6 +399,31 @@ class MainActivity : Activity() {
         })
         col.addView(note(tr("Игра рисуется в меньшем разрешении и растягивается на весь экран: меньше нагрузка на GPU, выше FPS. Размытия нет, это именно снижение числа пикселей. Применяется при следующем запуске.",
             "The game renders at a lower resolution and is scaled to the full screen: lower GPU load, higher FPS. Applied on next launch.")))
+        val mi = android.app.ActivityManager.MemoryInfo()
+        (getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
+        val totalMb = (mi.totalMem / 1024 / 1024).toInt()
+        val maxX = (totalMb * 6 / 10).coerceAtLeast(1024) / 128 * 128
+        val curX = prefs.getInt("xmx", 0)
+        val xl = TextView(this).apply { setTextColor(Th.text); setPadding(0, dp(18), 0, dp(4)) }
+        fun xText(v: Int) { xl.text = if (v == 0) tr("Память игры: авто", "Game memory: auto") else tr("Память игры: $v МБ", "Game memory: $v MB") }
+        xText(curX)
+        col.addView(xl)
+        val xs = SeekBar(this).apply {
+            max = (maxX - 512) / 128; progress = if (curX == 0) 0 else ((curX - 512) / 128).coerceIn(0, max)
+            visibility = if (curX == 0) View.GONE else View.VISIBLE
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, u: Boolean) { xText(512 + p * 128) }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) { prefs.edit().putInt("xmx", 512 + (sb?.progress ?: 0) * 128).apply() }
+            })
+        }
+        col.addView(chipRow(listOf(tr("Авто", "Auto"), tr("Вручную", "Manual")), if (curX == 0) 0 else 1) { i ->
+            if (i == 0) { prefs.edit().putInt("xmx", 0).apply(); xs.visibility = View.GONE; xText(0) }
+            else { val v = 512 + xs.progress * 128; prefs.edit().putInt("xmx", v).apply(); xs.visibility = View.VISIBLE; xText(v) }
+        })
+        col.addView(xs)
+        col.addView(note(tr("Больше памяти полезно для модов, но слишком большое значение система может «убить». Всего ОЗУ: $totalMb МБ. Применяется при следующем запуске.",
+            "More memory helps with mods, but too large a value may get the game killed. Total RAM: $totalMb MB. Applied on next launch.")))
         col.addView(header(tr("Специальное", "Special")))
         col.addView(TextView(this).apply { text = tr("Источник каталога", "Catalog source"); setTextColor(Th.text); setPadding(0, 0, 0, dp(6)) })
         col.addView(chipRow(listOf("Modrinth", "Modrinth Black"), prefs.getInt("modSource", 2) - 1) { i -> prefs.edit().putInt("modSource", i + 1).apply() })
@@ -588,16 +655,26 @@ class MainActivity : Activity() {
         fun btn(t: String, bg: Int, fg: Int = Color.WHITE, onClick: () -> Unit) = Button(this).apply {
             text = t; isAllCaps = false; setTextColor(fg); background = sel(bg); setOnClickListener { onClick() }
         }
-        val sw = android.widget.Switch(this).apply {
-            text = tr("Стройный скин (руки 3 px)", "Slim skin (3 px arms)")
-            setTextColor(Th.text); isChecked = prefs.getBoolean("slim", false)
-            setOnCheckedChangeListener { _, on ->
-                prefs.edit().putBoolean("slim", on).apply()
-                skin.slim = on; skinView.slim = on
-            }
-        }
         skin.slim = prefs.getBoolean("slim", false)
-        col.addView(sw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
+        val modelRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        val modelBtns = ArrayList<TextView>()
+        fun paintModel() = modelBtns.forEachIndexed { i, t ->
+            val on = (i == 1) == prefs.getBoolean("slim", false)
+            t.background = sel(if (on) 0xFF1B6E34.toInt() else 0xFF2EA84F.toInt())
+        }
+        for ((i, label) in listOf(tr("Широкий", "Wide"), tr("Стройный", "Slim")).withIndex()) {
+            val t = TextView(this).apply {
+                text = label; textSize = 15f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; isClickable = true
+                setOnClickListener {
+                    prefs.edit().putBoolean("slim", i == 1).apply()
+                    skin.slim = i == 1; skinView.slim = i == 1; paintModel()
+                }
+            }
+            modelBtns.add(t)
+            modelRow.addView(t, LinearLayout.LayoutParams(dp(130), dp(44)).apply { marginStart = dp(6); marginEnd = dp(6) })
+        }
+        paintModel()
+        col.addView(modelRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8); bottomMargin = dp(8) })
         col.addView(btn(tr("Загрузить скин (PNG)", "Upload skin (PNG)"), 0xFF14301D.toInt()) {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/png"), 77)
         })
@@ -748,7 +825,7 @@ class MainActivity : Activity() {
         }
         box.addView(filter)
         val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(12), 0, dp(12), dp(8)) }
-        box.addView(chips)
+        box.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(chips) })
         val sv = ScrollView(this)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), dp(24)) }
         sv.addView(list)
@@ -767,7 +844,7 @@ class MainActivity : Activity() {
             }
             val q = filter.text.toString().trim()
             fun section(name: String, items: List<String>, key: String) {
-                if (loader != "all" && loader != key) return
+                if (loader == "downloaded" || (loader != "all" && loader != key)) return
                 val f = items.filter { q.isEmpty() || it.contains(q) }
                 if (f.isEmpty()) return
                 list.addView(TextView(this).apply { text = name; textSize = 20f; setTextColor(Th.accent); setPadding(0, dp(18), 0, dp(6)) })
@@ -799,6 +876,35 @@ class MainActivity : Activity() {
                 }
             }
             section("Vanilla", vanilla, "vanilla"); section("Fabric", fabric, "fabric"); section("Forge", forge, "forge")
+            if (loader == "all" || loader == "downloaded") {
+                val mine = installedProfiles().filter { q.isEmpty() || it.contains(q) || prettyProfile(it).contains(q) }
+                if (mine.isNotEmpty()) {
+                    list.addView(TextView(this).apply { text = tr("Скачанные", "Downloaded"); textSize = 20f; setTextColor(Th.accent); setPadding(0, dp(18), 0, dp(6)) })
+                    list.addView(View(this).apply { setBackgroundColor(0xFF2EA84F.toInt()) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)))
+                    for (id in mine) {
+                        val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
+                        r.addView(TextView(this).apply { text = prettyProfile(id) + if (id == selectedProfile()) "  ✓" else ""; textSize = 17f; setTextColor(Th.text) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                        r.addView(Button(this).apply {
+                            text = tr("Удалить", "Delete"); isAllCaps = false; textSize = 12f; setTextColor(Color.WHITE); background = sel(0xFFB3261E.toInt())
+                            setOnClickListener {
+                                if (busy) { Toast.makeText(this@MainActivity, tr("Подождите: идёт загрузка", "Wait: a download is in progress"), Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+                                AlertDialog.Builder(this@MainActivity)
+                                    .setTitle(tr("Удалить версию?", "Delete version?"))
+                                    .setMessage(prettyProfile(id))
+                                    .setNegativeButton(tr("Отмена", "Cancel"), null)
+                                    .setPositiveButton(tr("Удалить", "Delete")) { _, _ ->
+                                        File(dataRoot(), "versions/$id").deleteRecursively()
+                                        if (selectedProfile() == id) prefs.edit().remove("profile").apply()
+                                        versionText.text = tr("Версия: ", "Version: ") + prettyProfile(selectedProfile())
+                                        render()
+                                    }.show()
+                            }
+                        }, LinearLayout.LayoutParams(dp(130), dp(40)))
+                        list.addView(r)
+                        list.addView(View(this).apply { setBackgroundColor(Th.line2) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
+                    }
+                }
+            }
             if (list.childCount == 0) list.addView(TextView(this).apply { text = tr("Ничего не найдено", "Nothing found"); setTextColor(Th.dim); setPadding(0, dp(16), 0, 0) })
         }
 
@@ -806,7 +912,7 @@ class MainActivity : Activity() {
         fun refreshChips() = chipViews.forEach { (k, t) ->
             t.setBackgroundColor(if (k == loader) 0xFF2EA84F.toInt() else 0xFF14301D.toInt())
         }
-        for ((k, label) in listOf("all" to tr("Все", "All"), "vanilla" to "Vanilla", "fabric" to "Fabric", "forge" to "Forge")) {
+        for ((k, label) in listOf("all" to tr("Все", "All"), "vanilla" to "Vanilla", "fabric" to "Fabric", "forge" to "Forge", "downloaded" to tr("Скачанные", "Downloaded"))) {
             val t = TextView(this).apply {
                 text = label; textSize = 14f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; setPadding(dp(14), dp(8), dp(14), dp(8))
                 setOnClickListener { loader = k; refreshChips(); render() }
@@ -1231,7 +1337,8 @@ class MainActivity : Activity() {
         val mi = android.app.ActivityManager.MemoryInfo()
         (getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
         val totalMb = mi.totalMem / 1024 / 1024
-        val xmx = when { totalMb < 5000 -> 1024; totalMb < 10000 -> 1536; else -> 2048 }
+        val manualX = prefs.getInt("xmx", 0)
+        val xmx = if (manualX > 0) manualX else when { totalMb < 5000 -> 1024; totalMb < 10000 -> 1536; else -> 2048 }
         log("ОЗУ устройства: $totalMb МБ, память игры: $xmx МБ")
         cmd.add("-Xmx${xmx}M")
         cmd.add("-XX:+UseSerialGC")

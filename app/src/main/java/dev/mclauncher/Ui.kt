@@ -49,5 +49,7 @@ object Th {
     val dim get() = c(0xFF7FA08A, 0xFF5A7A62)
     val line get() = c(0xFF22332A, 0xFFCADBCE)
     val line2 get() = c(0xFF1B2A20, 0xFFDCE8DF)
+    val altBg get() = (if (light) 0xFF0B0F0C else 0xFFF1F6F2).toInt()
+    val altText get() = (if (light) 0xFF43E06A else 0xFF10200F).toInt()
     val hint get() = c(0xFF58705F, 0xFF8AA391)
 }
