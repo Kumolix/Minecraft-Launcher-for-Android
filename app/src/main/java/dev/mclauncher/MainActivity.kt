@@ -175,6 +175,13 @@ class MainActivity : Activity() {
             setOnClickListener { start() }
         }
         root.addView(playBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(76)))
+        if (Build.SUPPORTED_64_BIT_ABIS.isEmpty()) {
+            playBtn.isEnabled = false
+            Toast.makeText(this, tr("Нужен 64-битный процессор (arm64). На этом устройстве игра не запустится.", "A 64-bit (arm64) CPU is required. The game cannot run on this device."), Toast.LENGTH_LONG).show()
+        } else {
+            val es = (getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager).deviceConfigurationInfo.reqGlEsVersion
+            if (es < 0x30002) Toast.makeText(this, tr("Видеочип поддерживает OpenGL ES ниже 3.2: игра может не запуститься или работать плохо.", "GPU supports OpenGL ES below 3.2: the game may not run or may run poorly."), Toast.LENGTH_LONG).show()
+        }
 
         // затемнение + боковое меню
         scrim = View(this).apply {
@@ -389,6 +396,37 @@ class MainActivity : Activity() {
         throw err ?: RuntimeException("нет ответа")
     }
 
+    // индекс скачанного: projectId -> {t: тип, f: имя файла, n: название}
+    private fun idx(): JSONObject = try { JSONObject(prefs.getString("installed", "{}")) } catch (_: Exception) { JSONObject() }
+    private fun idxSave(o: JSONObject) { prefs.edit().putString("installed", o.toString()).apply() }
+    private fun typeDir(type: String) = when (type) { "resourcepack" -> "resourcepacks"; "shader" -> "shaderpacks"; else -> "mods" }
+    private fun packFile(type: String, name: String) = File(File(dataRoot(), "game"), typeDir(type) + "/" + name)
+
+    /** Кнопки строки каталога: «Скачать» или «Загружено» + «Удалить». */
+    private fun fillActions(box: LinearLayout, id: String, type: String, loader: String, title: String) {
+        box.removeAllViews()
+        val rec = idx().optJSONObject(id)
+        if (rec != null && packFile(rec.optString("t"), rec.optString("f")).exists()) {
+            box.addView(Button(this).apply {
+                text = tr("Загружено", "Downloaded"); isAllCaps = false; setTextColor(Color.WHITE); background = sel(0xFF14301D.toInt()); isEnabled = false
+            }, LinearLayout.LayoutParams(dp(120), dp(40)))
+            box.addView(Button(this).apply {
+                text = tr("Удалить", "Delete"); isAllCaps = false; setTextColor(Color.WHITE); background = sel(0xFFB3261E.toInt())
+                setOnClickListener {
+                    packFile(rec.optString("t"), rec.optString("f")).delete()
+                    idxSave(idx().apply { remove(id) })
+                    fillActions(box, id, type, loader, title)
+                }
+            }, LinearLayout.LayoutParams(dp(100), dp(40)).apply { marginStart = dp(8) })
+        } else {
+            val btn = Button(this).apply {
+                text = tr("Скачать", "Download"); isAllCaps = false; setTextColor(Color.WHITE); background = sel(0xFF2EA84F.toInt())
+            }
+            btn.setOnClickListener { installProject(id, type, loader, title, btn) { fillActions(box, id, type, loader, title) } }
+            box.addView(btn, LinearLayout.LayoutParams(dp(150), dp(40)))
+        }
+    }
+
     private fun catalogPage(): View {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         var type = "mod"; var loader = if (selectedProfile().contains("forge")) "forge" else "fabric"
@@ -398,7 +436,44 @@ class MainActivity : Activity() {
         }
         box.addView(q)
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), dp(24)) }
+        fun showDownloaded() {
+            list.removeAllViews()
+            val index = idx()
+            val known = HashSet<String>()
+            var count = 0
+            fun row(title: String, sub: String, type: String, file: File, id: String?) {
+                count++
+                val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(10), 0, dp(10)) }
+                val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                col.addView(TextView(this).apply { text = title; textSize = 16f; setTextColor(Th.text); typeface = Typeface.DEFAULT_BOLD })
+                col.addView(TextView(this).apply { text = sub; textSize = 12f; setTextColor(Th.dim) })
+                r.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                r.addView(Button(this).apply {
+                    text = tr("Удалить", "Delete"); isAllCaps = false; setTextColor(Color.WHITE); background = sel(0xFFB3261E.toInt())
+                    setOnClickListener {
+                        file.delete()
+                        if (id != null) idxSave(idx().apply { remove(id) })
+                        (r.parent as? LinearLayout)?.removeView(r)
+                    }
+                }, LinearLayout.LayoutParams(dp(100), dp(40)))
+                list.addView(r)
+                list.addView(View(this).apply { setBackgroundColor(Th.line2) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
+            }
+            val keys = index.keys()
+            while (keys.hasNext()) {
+                val id = keys.next(); val o = index.getJSONObject(id)
+                val f = packFile(o.optString("t"), o.optString("f"))
+                if (f.exists()) { known.add(f.path); row(o.optString("n", f.name), typeDir(o.optString("t")) + " · " + f.name, o.optString("t"), f, id) }
+            }
+            for (t in listOf("mod", "resourcepack", "shader")) {
+                File(File(dataRoot(), "game"), typeDir(t)).listFiles()?.sortedBy { it.name }?.forEach {
+                    if (it.isFile && !known.contains(it.path) && !it.name.endsWith(".part")) row(it.name, typeDir(t), t, it, null)
+                }
+            }
+            if (count == 0) list.addView(TextView(this).apply { text = tr("Пока ничего не скачано", "Nothing downloaded yet"); setTextColor(Th.dim); setPadding(0, dp(16), 0, 0) })
+        }
         fun search() {
+            if (type == "downloaded") { showDownloaded(); return }
             list.removeAllViews()
             list.addView(TextView(this).apply { text = tr("Загрузка…", "Loading…"); setTextColor(Th.dim); setPadding(0, dp(16), 0, 0) })
             val query = q.text.toString().trim()
@@ -423,11 +498,9 @@ class MainActivity : Activity() {
                             row.addView(TextView(this).apply { text = h.getString("title"); textSize = 17f; setTextColor(Th.text); typeface = Typeface.DEFAULT_BOLD })
                             row.addView(TextView(this).apply { text = h.optString("author") + "  ·  ⬇ " + h.optInt("downloads"); textSize = 12f; setTextColor(Th.accent) })
                             row.addView(TextView(this).apply { text = h.optString("description"); textSize = 13f; setTextColor(Th.text2); maxLines = 3 })
-                            val btn = Button(this).apply {
-                                text = tr("Скачать", "Download"); isAllCaps = false; setTextColor(Color.WHITE); background = sel(0xFF2EA84F.toInt())
-                            }
-                            btn.setOnClickListener { installProject(h.getString("project_id"), type, loader, btn) }
-                            row.addView(btn, LinearLayout.LayoutParams(dp(150), dp(40)).apply { topMargin = dp(6) })
+                            val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                            fillActions(actions, h.getString("project_id"), type, loader, h.getString("title"))
+                            row.addView(actions, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
                             list.addView(outer)
                             list.addView(View(this).apply { setBackgroundColor(Th.line2) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
                         }
@@ -440,11 +513,17 @@ class MainActivity : Activity() {
                 }
             }.start()
         }
-        val types = listOf("mod" to tr("Моды", "Mods"), "resourcepack" to tr("Ресурспаки", "Resource packs"), "shader" to tr("Шейдеры", "Shaders"))
-        box.addView(chipRow(types.map { it.second }, 0) { i -> type = types[i].first; search() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12); bottomMargin = dp(6) })
-        val loaders = listOf("fabric", "forge", "neoforge", "quilt")
-        box.addView(chipRow(loaders.map { it.replaceFirstChar { c -> c.uppercase() } }, loaders.indexOf(loader)) { i -> loader = loaders[i]; if (type == "mod") search() },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12); bottomMargin = dp(6) })
+        val types = listOf("mod" to tr("Моды", "Mods"), "resourcepack" to tr("Ресурспаки", "Resource packs"), "shader" to tr("Шейдеры", "Shaders"), "downloaded" to tr("Скачанные", "Downloaded"))
+        val loaders = listOf("fabric", "forge")
+        val loaderRow = chipRow(loaders.map { it.replaceFirstChar { c -> c.uppercase() } }, loaders.indexOf(loader).coerceAtLeast(0)) { i -> loader = loaders[i]; if (type == "mod") search() }
+        val typeRow = chipRow(types.map { it.second }, 0) { i ->
+            type = types[i].first
+            loaderRow.visibility = if (type == "mod") View.VISIBLE else View.GONE
+            q.visibility = if (type == "downloaded") View.GONE else View.VISIBLE
+            search()
+        }
+        box.addView(typeRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12); bottomMargin = dp(6) })
+        box.addView(loaderRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(12); bottomMargin = dp(6) })
         val sv = ScrollView(this); sv.addView(list)
         box.addView(sv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         q.setOnEditorActionListener { _, _, _ -> search(); true }
@@ -471,7 +550,7 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun installProject(id: String, type: String, loader: String, btn: Button) {
+    private fun installProject(id: String, type: String, loader: String, title: String, btn: Button, onDone: () -> Unit) {
         btn.isEnabled = false; btn.alpha = 0.6f; btn.text = tr("Скачивание…", "Downloading…")
         Thread {
             var res = ""
@@ -488,10 +567,11 @@ class MainActivity : Activity() {
                 val dest = File(File(root, "game"), "$dir/" + f.getString("filename"))
                 val ok = download(f.getString("url"), dest, f.optJSONObject("hashes")?.optString("sha1")?.ifEmpty { null })
                 if (!ok) throw RuntimeException(tr("ошибка загрузки", "download failed"))
+                idxSave(idx().apply { put(id, JSONObject().put("t", type).put("f", f.getString("filename")).put("n", title)) })
                 res = "ok"
             } catch (e: Throwable) { res = e.message ?: e.toString() }
             runOnUiThread {
-                if (res == "ok") { btn.text = tr("✓ Скачано", "✓ Downloaded") }
+                if (res == "ok") { onDone() }
                 else { btn.isEnabled = true; btn.alpha = 1f; btn.text = tr("Скачать", "Download"); Toast.makeText(this, res, Toast.LENGTH_LONG).show() }
             }
         }.start()
@@ -925,14 +1005,16 @@ class MainActivity : Activity() {
 
     private fun confirmWipe() {
         AlertDialog.Builder(this)
-            .setTitle("Удалить всё скачанное?")
-            .setMessage("Будут удалены клиент игры, библиотеки, ресурсы и Java-рантайм. Папка game (миры и настройки) останется.")
-            .setNegativeButton("Отмена", null)
-            .setPositiveButton("Удалить") { _, _ -> wipe() }
+            .setTitle(tr("Удалить скачанное?", "Delete downloads?"))
+            .setMessage(tr("Будут удалены клиент игры, библиотеки, ресурсы, Java-рантайм, моды и паки. Миры (папка saves) можно оставить.",
+                "The game client, libraries, assets, Java runtime, mods and packs will be deleted. You can keep your worlds (saves)."))
+            .setNegativeButton(tr("Отмена", "Cancel"), null)
+            .setNeutralButton(tr("Вообще всё", "Everything")) { _, _ -> wipe(true) }
+            .setPositiveButton(tr("Всё, кроме миров", "All except worlds")) { _, _ -> wipe(false) }
             .show()
     }
 
-    private fun wipe() {
+    private fun wipe(everything: Boolean) {
         setBusy(true)
         Thread {
             try {
@@ -940,16 +1022,26 @@ class MainActivity : Activity() {
                 var freed = 0L
                 val targets = listOf(
                     File(root, "assets"), File(root, "libraries"), File(root, "versions"),
-                    File(root, "natives"), File(root, "launch_command.txt"),
-                    File(root, "runtime.tar.xz"), File(root, "runtime.tar.gz"),
-                    runtimeDir(), cacheDir, File(filesDir, "natives"), File(filesDir, "lwjgl"), File(filesDir, "mg"), File(root, "mg-plugin.apk")
+                    File(root, "natives"), File(root, "launch_command.txt"), File(root, "launch.json"),
+                    File(root, "runtime.tar.xz"), File(root, "runtime.tar.gz"), File(root, "forge-installer.jar"),
+                    File(root, "launcher_profiles.json"),
+                    runtimeDir(), cacheDir, File(filesDir, "natives"), File(filesDir, "lwjgl"), File(filesDir, "mg"),
+                    File(filesDir, "skin_default.png"), File(root, "mg-plugin.apk")
                 ) + (root.listFiles { f -> f.name.startsWith("lwjgl-natives") }?.toList() ?: emptyList())
                 for (t in targets) {
                     freed += sizeOf(t)
                     t.deleteRecursively()
                 }
+                val game = File(root, "game")
+                if (everything) {
+                    freed += sizeOf(game); game.deleteRecursively()
+                } else {
+                    game.listFiles()?.forEach { if (it.name != "saves") { freed += sizeOf(it); it.deleteRecursively() } }
+                }
+                prefs.edit().remove("profile").remove("installed").apply()
                 cacheDir.mkdirs()
-                log("Удалено: ${freed / 1024 / 1024} МБ. Папка game сохранена.")
+                runOnUiThread { versionText.text = tr("Версия: ", "Version: ") + prettyProfile(selectedProfile()) }
+                log("Удалено: ${freed / 1024 / 1024} МБ. " + if (everything) "Миры тоже удалены." else "Папка saves сохранена.")
             } catch (e: Throwable) {
                 log("ОШИБКА удаления: $e")
             } finally {
@@ -1022,7 +1114,7 @@ class MainActivity : Activity() {
         val librariesDir = File(root, "libraries")
         logFile = File(root, "launcher.log").also { it.writeText("") }
         val profFile = File(root, "versions/$profile/$profile.json")
-        val child: JSONObject? = if (profFile.exists()) JSONObject(profFile.readText()) else null
+        val child: JSONObject? = if (profFile.exists()) JSONObject(profFile.readText()).takeIf { it.has("inheritsFrom") } else null
         val baseVer = child?.optString("inheritsFrom", "")?.ifEmpty { null } ?: profile
         val natives = File(filesDir, "natives/$baseVer").apply { mkdirs() }
         log("Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MODEL}, ${Build.SUPPORTED_ABIS.joinToString()}")

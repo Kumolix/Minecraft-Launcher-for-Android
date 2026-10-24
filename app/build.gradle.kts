@@ -9,9 +9,9 @@ android {
 
     defaultConfig {
         applicationId = "dev.mclauncher"
-        minSdk = 26
+        minSdk = 28
         targetSdk = 28
-        versionCode = 18
+        versionCode = 19
         versionName = rootProject.file("VERSION").readText().trim()
     }
 
