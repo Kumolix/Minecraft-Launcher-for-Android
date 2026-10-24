@@ -1228,7 +1228,12 @@ class MainActivity : Activity() {
         val gameArgs = collectArgs(args.optJSONArray("game"), sub)
         val cmd = ArrayList<String>()
         cmd.add(java.path)
-        cmd.add("-Xmx1536M")
+        val mi = android.app.ActivityManager.MemoryInfo()
+        (getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
+        val totalMb = mi.totalMem / 1024 / 1024
+        val xmx = when { totalMb < 5000 -> 1024; totalMb < 10000 -> 1536; else -> 2048 }
+        log("ОЗУ устройства: $totalMb МБ, память игры: $xmx МБ")
+        cmd.add("-Xmx${xmx}M")
         cmd.add("-XX:+UseSerialGC")
         cmd.add("-XX:ErrorFile=${File(gameDir, "hs_err.log").path}")
         cmd.add("-Djava.io.tmpdir=${cacheDir.path}")
